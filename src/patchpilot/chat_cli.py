@@ -5,8 +5,8 @@ import re
 from contextlib import ExitStack
 from pathlib import Path
 
-from patchpilot.agent import AgentBudget
 from patchpilot.anthropic_model import DEFAULT_MODEL, AnthropicModel
+from patchpilot.runtime import AgentBudget
 from patchpilot.session import HELP, AgentSession
 from patchpilot.session_store import SessionStore
 
@@ -27,6 +27,22 @@ def add_chat_parser(commands, add_help, positive_integer, positive_timeout) -> N
         "--allow-commands",
         action="store_true",
         help="允许本次启动自动执行宿主命令（不是Docker沙箱）",
+    )
+    parser.add_argument(
+        "--allow-harness",
+        action="store_true",
+        help="允许模型按需运行已配置的受控项目检查",
+    )
+    parser.add_argument(
+        "--harness-config",
+        type=Path,
+        help="Harness TOML配置，默认读取仓库/.patchpilot/harness.toml",
+    )
+    parser.add_argument(
+        "--harness-runtime",
+        choices=("auto", "docker", "host"),
+        default=None,
+        help="Harness执行环境，默认优先Docker并按配置降级宿主",
     )
     parser.add_argument("--model", help="工作模型名称；恢复时默认沿用记录")
     parser.add_argument("--evaluator-model", help="评估模型名称，默认与工作模型相同")
@@ -77,6 +93,13 @@ def show_event(event: dict) -> None:
     kind = event["event"]
     if kind == "assistant_text":
         print(event["text"], flush=True)
+    elif kind == "harness_started":
+        print(f"[Harness开始] profile={event['profile']}", flush=True)
+    elif kind == "harness_finished":
+        print(
+            f"[Harness完成] {event['status']} / {event['runtime']} / 退出码 {event['exit_code']}",
+            flush=True,
+        )
     elif kind == "model_started":
         print("[目标评估中]" if event["kind"] == "evaluator" else "[模型处理中]", flush=True)
     elif kind == "tool_started":
@@ -84,6 +107,16 @@ def show_event(event: dict) -> None:
         print(f"[工具] {event['tool']}" + (f"\n{command}" if command else ""), flush=True)
     elif kind == "tool_finished":
         result = event["result"]
+        if "harness" in result:
+            harness = result["harness"]
+            print(
+                f"[Harness] {harness['status']} / {harness['runtime']} / "
+                f"退出码 {harness['exit_code']}",
+                flush=True,
+            )
+            if harness.get("output"):
+                print(harness["output"], flush=True)
+            return
         if "exit_code" in result:
             print(
                 f"[命令退出码] {result['exit_code']}" + ("（超时）" if result["timed_out"] else ""),
@@ -136,6 +169,9 @@ def run_chat(arguments) -> int:
             evaluator_model=evaluator,
             store=store,
             allow_commands=arguments.allow_commands,
+            allow_harness=arguments.allow_harness,
+            harness_config=arguments.harness_config,
+            harness_runtime=arguments.harness_runtime,
             budget=budget,
             max_continuations=arguments.max_continuations,
             on_event=show_event,
@@ -146,6 +182,8 @@ def run_chat(arguments) -> int:
                 print(f"记录：{session.store.directory}\n{HELP}")
                 if arguments.allow_commands:
                     print("已允许自动执行宿主命令；命令拥有当前用户的环境访问能力。")
+                if arguments.allow_harness:
+                    print("已允许模型按需运行Harness检查；结果会标记隔离或宿主证据。")
                 while True:
                     try:
                         text = input("你 > ")
@@ -164,6 +202,9 @@ def run_chat(arguments) -> int:
                             evaluator_model=evaluator,
                             sessions_root=arguments.sessions_dir,
                             allow_commands=arguments.allow_commands,
+                            allow_harness=arguments.allow_harness,
+                            harness_config=arguments.harness_config,
+                            harness_runtime=arguments.harness_runtime,
                             budget=budget,
                             max_continuations=arguments.max_continuations,
                             on_event=show_event,

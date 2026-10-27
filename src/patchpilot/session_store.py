@@ -38,6 +38,12 @@ class _Message(_Record):
     content: str | list[dict]
 
 
+class _Harness(_Record):
+    enabled: bool
+    config: str | None
+    runtime: Literal["auto", "docker", "host"] | None
+
+
 class _State(_Record):
     version: Literal[1]
     repo: str
@@ -47,6 +53,7 @@ class _State(_Record):
     baselines: dict[str, str | None]
     model: str
     evaluator_model: str
+    harness: _Harness | None = None
 
 
 class SessionStore:

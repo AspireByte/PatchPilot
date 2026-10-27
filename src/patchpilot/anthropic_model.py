@@ -6,8 +6,8 @@ import json
 import anthropic
 from anthropic.types import Message, MessageParam, ToolParam
 
-from patchpilot.agent import ModelFailure
 from patchpilot.control import ExecutionControl
+from patchpilot.runtime import ModelFailure
 
 DEFAULT_MODEL = "claude-opus-5-5"
 

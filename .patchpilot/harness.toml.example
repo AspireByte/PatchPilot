@@ -1,0 +1,12 @@
+version = 1
+runtime = "auto"
+# Docker 镜像可选；未提供或不可用时，auto 会按 allow_host_fallback 降级宿主。
+image = "patchpilot-project:py312"
+default_profile = "test"
+timeout_seconds = 120
+max_output_bytes = 16000
+allow_host_fallback = true
+
+[profiles.test]
+argv = ["python", "-m", "pytest", "-q"]
+cwd = "."

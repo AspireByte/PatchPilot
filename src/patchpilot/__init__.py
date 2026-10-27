@@ -1,1 +1,1 @@
-"""PatchPilot：受控代码修复任务的基础工具。"""
+"""PatchPilot：本地仓库持续对话与按需 Harness 检查。"""

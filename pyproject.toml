@@ -1,7 +1,7 @@
 [project]
 name = "patchpilot"
 version = "0.1.0"
-description = "面向受支持 Python 仓库的受控代码修复 Agent"
+description = "本地仓库持续对话与按需 Harness 检查 Agent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -16,8 +16,6 @@ dependencies = [
 
 [project.scripts]
 patchpilot = "patchpilot.cli:main"
-patchpilot-service = "patchpilot.service.cli:main"
-patchpilot-eval = "patchpilot.evaluation.cli:main"
 
 [build-system]
 requires = ["hatchling==1.27.0"]

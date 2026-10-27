@@ -1,499 +1,304 @@
 # PatchPilot 项目学习与面试讲解路线
 
-这份文档服务两个目标：
+这份文档按当前代码整理。PatchPilot 现在的产品入口只有 `patchpilot chat`：用户围绕一个本地仓库连续提问、阅读代码、修改文件、运行已授权命令，并按需调用受控 Harness 检查。
 
-1. 用最短路径读懂项目的主流程，而不是从测试或所有细节开始。
-2. 把源码中的设计取舍转换成简历和面试中可以核对的项目亮点。
+旧的固定任务、服务和评测代码仍保留在仓库中，用于内部迁移和回归参考；它们不再是普通用户的启动方式，也不应和聊天 Agent 混为一条调用链。
 
-项目名是 **PatchPilot**。它是一个面向受支持 Python 仓库的受控代码修复 Agent：模型读取 Issue 和公开代码，通过白名单工具生成候选补丁；系统再从固定基线重建工作区，在 Docker 中执行测试，并保存补丁、日志、会话和验证报告。
+## 一、先记住项目定位
 
-项目有两条需要分开理解的主线：
+PatchPilot 是一个强调权限、证据和可恢复性的本地代码 Agent 原型。模型负责理解目标、决定下一步和组织工具调用；运行时负责检查参数、权限、路径和预算；Harness 负责在临时副本中执行预先登记的检查；会话层负责保存历史、工具结果、目标状态和恢复信息。
 
-- `patchpilot chat`：面向本地仓库的持续开发对话，支持文件工具、可选宿主命令、会话恢复和显式 `/goal` 目标循环。
-- `agent-run` / `patchpilot-service`：面向固定任务快照的受控修复、独立验收和 PostgreSQL 任务服务。
+它不是只会修改代码的补丁生成器，也不是已经具备公网多租户安全能力的平台。当前综合 Agent 能够解释项目、阅读配置和测试、修改普通文本文件、执行用户授权的宿主命令，并在需要时请求 Harness 产生检查证据。
 
-面试时不要把它描述成已经具备任意仓库、任意命令、多人公网运行能力的通用 Coding Agent。当前最有说服力的定位是：**一个强调边界、证据和可恢复性的代码修复 Agent 原型**。
-
----
-
-## 一、先记住这条总调用链
-
-### 1. 固定任务修复链
-
-```text
-命令行
-  -> patchpilot.cli.main()
-  -> load_task()
-  -> compute_snapshot_hash()
-  -> create_workspace()
-  -> run_agent()
-  -> AnthropicModel.complete()
-  -> ToolDispatcher.dispatch()
-  -> list/read/search/apply_patch/run_tests 等工具
-  -> export_diff()
-  -> verify_patch()
-  -> DockerRunner.run()
-  -> agent-result.json / verification.json / candidate.patch
-```
-
-对应的核心问题是：模型提出了什么动作，运行时如何校验，动作改了哪一份工作区，测试证据如何产生，最后结论如何绑定到这次补丁。
-
-### 2. 本地持续对话链
+## 二、当前唯一产品调用链
 
 ```text
 patchpilot chat
+  -> cli.main()
   -> chat_cli.run_chat()
   -> AgentSession.submit()
+  -> ContextManager 检查完整上下文容量
   -> AnthropicModel.complete()
   -> LocalTools.dispatch()
-  -> SessionStore.save()/event()
-  -> 普通回答，或 GoalController 评估后继续/暂停
+       -> list_files / read_file / search_text
+       -> write_file / edit_file / get_diff
+       -> run_command（需要 --allow-commands）
+       -> run_harness_check（需要 --allow-harness）
+  -> 工具结果按 tool_use_id 回到下一轮消息
+  -> SessionStore 保存消息、事件、用量和修改记录
+  -> 普通回答，或显式 /goal 后评估并继续/暂停
 ```
 
-这条链直接操作用户指定的本地仓库。它和固定任务模式使用不同的工具、权限和验证路径；`chat` 中的宿主命令不是 Docker 沙箱命令。
+用户输入一次后，模型可以连续进行多次“模型响应—工具调用—工具结果”循环；普通回答结束后回到输入提示，不会自动进入目标评估。只有输入 `/goal <完成条件>`，才会开启独立、无工具的评估调用和自动续跑。
 
-### 3. 服务化链
+## 三、推荐的源码阅读顺序
 
-```text
-HTTP API
-  -> service.api.create_app()
-  -> Repository.create_run()
-  -> PostgreSQL queued 状态
-  -> Worker.claim()（行锁 + SKIP LOCKED）
-  -> AgentExecutor.execute()
-  -> run_agent()
-  -> heartbeat / checkpoint / artifact / event
-  -> Repository.finalize()
-```
+### 1. 先看入口和产品边界
 
-API 负责排队和查询，Worker 负责真正执行。两者通过 PostgreSQL 协作，不要把它讲成已经拆成多个微服务的平台。
+阅读：
 
----
-
-## 二、最快的代码阅读路线
-
-### 第 0 步：先看项目边界
-
-先读：
-
-1. `README.md` 开头和“当前边界”部分
+1. `README.md`
 2. `pyproject.toml`
-3. `docs/architecture.md`
-
-需要回答：
-
-- 项目解决什么问题？为什么限定为固定 Python 任务快照？
-- 有哪些入口命令？
-- 模型、工具运行时、Docker 执行器、独立验证器分别负责什么？
-- 哪些是当前能力，哪些只是后续计划？
-
-`pyproject.toml` 可以确认 Python 版本、依赖、入口脚本：
-
-- `patchpilot` -> `patchpilot.cli:main`
-- `patchpilot-service` -> `patchpilot.service.cli:main`
-- `patchpilot-eval` -> `patchpilot.evaluation.cli:main`
-
-### 第 1 步：从 CLI 入口建立索引
-
-读 `src/patchpilot/cli.py` 的 `main()`，只关注子命令分支：
-
-- `chat`：交给 `chat_cli.run_chat`
-- `validate-task`：调用 `load_task`，可输出 `to_agent_input`
-- `sandbox-check`：检查 Docker 和测试镜像
-- `agent-run`：创建模型、预算和 DockerRunner，调用 `run_agent`
-- `verify-patch`：读取补丁字节，调用 `verify_patch`
-
-这一步的目的不是读完参数，而是确定“入口如何把控制权交给核心模块”。
-
-### 第 2 步：先读任务和快照，不要先读模型
-
-按顺序读：
-
-1. `src/patchpilot/task.py`
-2. `src/patchpilot/snapshot.py`
-3. `src/patchpilot/workspace.py`
-
-重点看：
-
-- `TaskSpec` 用 Pydantic 严格限制任务格式、环境标识、可写目录和测试配置。
-- `load_task()` 检查 `task.json`、`repo/`、`Issue.md`、`src/`、`tests/`、`repro/`、`pytest.ini`，并核对快照 SHA-256。
-- `to_agent_input()` 显式构造给模型看的公开视图，避免把 `LoadedTask` 内部路径、参考答案或维护者资料直接序列化给模型。
-- `compute_snapshot_hash()` 对“相对 POSIX 路径 + 文件内容摘要”排序后再做总 SHA-256，不依赖修改时间和遍历顺序。
-- `create_workspace()` 只复制任务的 `repo/`，不复制任务包、答案或宿主目录，并再次校验复制结果摘要。
-
-这里形成一个重要面试概念：**任务元数据校验、快照身份校验和实际执行隔离是三件事**。`environment_id` 是登记信息，不等于自动获得沙箱权限；真正的测试隔离由 `DockerRunner` 完成。
-
-### 第 3 步：读单 Agent 循环
-
-核心文件：`src/patchpilot/agent.py`。
-
-重点函数和类：
-
-- `AgentBudget`：限制模型调用、工具调用、总时间、总 token、上下文和重复动作。
-- `AgentModel`：模型适配器协议，核心循环不依赖具体 SDK。
-- `ModelFailure`：把 SDK/网络失败归一成安全错误分类。
-- `run_agent()`：单决策者循环和候选补丁出口。
-
-建议按下面顺序读 `run_agent()`：
-
-1. 创建或恢复 `Workspace`。
-2. 用 `to_agent_input()` 构造公开任务输入。
-3. 先调用一次 `list_files` 做初始目录观察。
-4. 检查时间、调用次数、token、上下文和取消状态。
-5. 调用模型并保存完整 assistant 响应。
-6. 先做响应级协议检查，再逐个处理 `tool_use`。
-7. `ToolDispatcher.dispatch()` 返回结果后，构造带同一 `tool_use_id` 的 `tool_result`，放回下一轮消息。
-8. 记录 `model_started`、`model_finished`、`tool_started`、`tool_finished` 等事件。
-9. 模型合法 `end_turn` 后导出候选补丁并进入独立验证。
-10. 生成 `candidate.patch`、`transcript.json`、`events.jsonl`、`agent-result.json`。
-
-要特别理解三个顺序：
-
-- 响应级协议检查发生在工具执行前；不能收到半截补丁就开始执行。
-- 同一轮工具是逐个执行的，不是整批工具事务；前一个工具可能已经修改文件，后一个工具才发现参数错误。
-- `end_turn` 只表示模型结束候选生成，不表示补丁已经通过测试。
-
-### 第 4 步：读工具权限和补丁写入
-
-按顺序读：
-
-1. `src/patchpilot/tools.py`
-2. `src/patchpilot/patching.py`
-
-固定任务模式开放七个工具：
-
-```text
-list_files
-read_file
-search_text
-apply_patch
-add_regression_test
-get_diff
-run_tests
-```
-
-`ToolDispatcher` 的职责：
-
-- 用严格 Pydantic schema 校验参数，并拒绝多余字段。
-- 做路径白名单检查，拒绝越界、链接、隐藏路径和不允许修改的目录。
-- 限制文件大小、结果长度和测试目标。
-- 在 `artifacts/tools/` 保存每次工具调用的有界证据。
-
-`patching.py` 的亮点：
-
-- `apply_patch()` 要求模型传入最近工作区的 `expected_hash`，防止基于旧内容覆盖新内容。
-- 只允许受支持的 unified diff 和指定源码路径；原测试、配置、依赖不能被模型改写。
-- 补丁先在 staging 目录中执行 `git apply --check` 和实际应用，再核对文件清单和工作区摘要，最后发布到工作区。
-- `export_diff()` 从原始快照和当前工作区导出候选补丁，而不是相信模型自己声称改了什么。
-
-面试时可以把它概括成：**模型只提出意图，运行时决定动作是否有权限，文件系统变化再反过来生成证据**。
-
-### 第 5 步：读 Docker 执行和独立验收
-
-按顺序读：
-
-1. `src/patchpilot/sandbox.py`
-2. `src/patchpilot/verification.py`
-
-`DockerRunner` 负责：
-
-- 使用预构建、可识别的本地镜像，不在测试时动态安装依赖。
-- 将工作区复制进容器，而不是把宿主目录直接挂载给测试代码。
-- 用固定命令运行公开测试，并保存日志和有界 JUnit 报告。
-- 结合进程退出码和测试报告分类，区分通过、断言失败、收集错误、无测试、全部跳过、超时和基础设施错误。
-- 施加无网络、非 root、CPU/内存/进程数/临时目录等资源限制。
-
-`verify_patch()` 的核心保证：
-
-1. 从原始快照重新创建验证工作区。
-2. 只接收封存的补丁字节，不接收 Agent 当前工作区。
-3. 应用补丁后运行原测试、公开复现测试和维护者验收目录。
-4. 报告绑定 `patch_sha256`、`base_sha256`、`candidate_sha256`、验收材料摘要和实际镜像信息。
-5. 验收期间再次检查候选工作区和验收目录摘要是否发生变化。
-
-可信边界要讲准确：这套设计适合自行编写、维护者审核的可信任务；它提高了可追溯性和误判防护，不等于对恶意 Python 代码提供虚拟机级安全保证。
-
-### 第 6 步：再读本地聊天模式
-
-按顺序读：
-
-1. `src/patchpilot/chat_cli.py`
-2. `src/patchpilot/session.py`
-3. `src/patchpilot/local_tools.py`
-4. `src/patchpilot/session_store.py`
-5. `src/patchpilot/goal.py`
-6. `src/patchpilot/anthropic_model.py`
-
-关键职责：
-
-- `chat_cli.py` 解析 `--repo`、`--resume`、`--allow-api`、`--allow-commands` 和预算参数。
-- `AgentSession.submit()` 实现一轮或多轮模型—工具交互，普通输入回答后等待下一次输入。
-- `LocalTools` 提供 `list_files`、`read_file`、`search_text`、`write_file`、`edit_file`、`get_diff`，以及显式开启时的 `run_command`。
-- 本地文件修改必须先读取，并携带 `sha256`；文件版本变化时拒绝覆盖。
-- `SessionStore` 保存状态和事件；恢复会话时不会自动重放上一次未完成的命令，而是补充“结果未知”的工具结果。
-- `GoalController` 只有在用户显式输入 `/goal` 后才启用自动续跑；评估模型无工具权限，只能给完成/暂停/继续判断。
-- `AnthropicModel` 负责 SDK 适配、流式响应收集、完整 JSON 校验、超时和错误分类。
-
-这一条线的面试亮点是：**“持续对话”是会话状态机和恢复策略，不只是把模型调用放进 `while True`**。
-
-### 第 7 步：最后读服务和评测
-
-服务端按顺序读：
-
-1. `src/patchpilot/service/cli.py`
-2. `src/patchpilot/service/api.py`
-3. `src/patchpilot/service/repository.py`
-4. `src/patchpilot/service/worker.py`
-5. `src/patchpilot/service/executors.py`
-6. `src/patchpilot/service/models.py`
-7. `src/patchpilot/service/artifacts.py`
-
-评测按顺序读：
-
-1. `src/patchpilot/evaluation/catalog.py`
-2. `src/patchpilot/evaluation/runner.py`
-3. `src/patchpilot/evaluation/baseline.py`
-4. `src/patchpilot/evaluation/validation.py`
-5. `src/patchpilot/evaluation/metrics.py`
-
----
-
-## 三、核心代码文件清单
-
-### 入口和 Agent 编排
-
-| 文件 | 作用 | 面试关键词 |
-| --- | --- | --- |
-| `src/patchpilot/cli.py` | 统一 CLI 入口，分发聊天、任务校验、沙箱检查、Agent 执行和补丁验收 | 命令分层、显式授权 |
-| `src/patchpilot/chat_cli.py` | 本地聊天命令和交互终端 | 常驻交互、恢复会话 |
-| `src/patchpilot/agent.py` | 固定任务的单 Agent 循环、预算、工具协议、事件和候选导出 | 状态机、预算、可审计 |
-| `src/patchpilot/session.py` | 聊天模式的多轮会话、工具调用、目标续跑和暂停 | 会话状态、恢复、取消 |
-| `src/patchpilot/anthropic_model.py` | Anthropic SDK 适配层，不把 SDK 细节扩散到 Agent 循环 | 适配器、超时、错误分类 |
-| `src/patchpilot/goal.py` | `/goal` 目标的设置、暂停、恢复和评估结果解析 | 显式目标、评估器隔离 |
-| `src/patchpilot/control.py` | 取消和停止信号，在模型、工具、测试之间传递 | 协作式取消 |
-
-### 任务身份、工作区和补丁
-
-| 文件 | 作用 | 面试关键词 |
-| --- | --- | --- |
-| `src/patchpilot/task.py` | 严格校验 `task.json`、布局、Issue 和快照摘要；构造公开 Agent 输入 | Pydantic、输入边界 |
-| `src/patchpilot/snapshot.py` | 计算确定性的内容快照 SHA-256 | 可复现、内容寻址 |
-| `src/patchpilot/workspace.py` | 从固定快照复制独立运行目录 | 工作区隔离、基线 |
-| `src/patchpilot/patching.py` | 校验、staging、应用和导出 unified diff | 乐观并发、补丁边界 |
-| `src/patchpilot/verification.py` | 从基线重建工作区并执行独立验收 | 独立验证、证据绑定 |
-
-### 工具和执行环境
-
-| 文件 | 作用 | 面试关键词 |
-| --- | --- | --- |
-| `src/patchpilot/tools.py` | 固定任务工具 schema、路径策略、分发和工具证据 | 白名单、纵深防御 |
-| `src/patchpilot/sandbox.py` | Docker 容器创建、资源限制、日志和测试结果分类 | 受控执行、失败分类 |
-| `src/patchpilot/local_tools.py` | 聊天模式的本地文件工具和可选宿主命令 | 文件版本冲突、权限开关 |
-| `src/patchpilot/process_job.py` | 服务或测试中对外部进程的有限生命周期管理 | 进程树、超时清理 |
-
-### 会话和服务持久化
-
-| 文件 | 作用 | 面试关键词 |
-| --- | --- | --- |
-| `src/patchpilot/session_store.py` | 保存聊天会话状态、事件和恢复记录 | 原子保存、历史恢复 |
-| `src/patchpilot/service/api.py` | FastAPI 任务、运行记录、产物、取消、重启和 SSE 接口 | API 边界、事件续读 |
-| `src/patchpilot/service/repository.py` | PostgreSQL 状态读写、领取、租约、心跳、检查点和终态提交 | 行锁、fencing、事务 |
-| `src/patchpilot/service/worker.py` | 独立 Worker 领取任务、心跳、执行、发布结果 | 队列消费、租约 |
-| `src/patchpilot/service/executors.py` | `AgentExecutor` 和 `ReferenceDiagnosticExecutor` 两种执行器 | 真实模型与诊断路径分离 |
-| `src/patchpilot/service/artifacts.py` | 补丁、报告、日志和 checkpoint 产物存储与恢复 | 大文件外置、摘要登记 |
-| `src/patchpilot/service/models.py` | Run、Attempt、Step、Event、Artifact、Checkpoint 等数据库表结构 | 状态建模 |
-
-### 评测和基线
-
-| 文件 | 作用 | 面试关键词 |
-| --- | --- | --- |
-| `src/patchpilot/evaluation/catalog.py` | 加载 20 项任务、开发/保留拆分、任务指纹 | 数据集治理 |
-| `src/patchpilot/evaluation/runner.py` | 生成批次计划、冻结环境信息、运行 Agent 或 baseline 并保存记录 | 可复现实验 |
-| `src/patchpilot/evaluation/baseline.py` | 固定检索 + 单次生成的对照策略，不提供测试反馈循环 | 对照实验 |
-| `src/patchpilot/evaluation/validation.py` | 检查任务、参考补丁和验收材料 | 评测数据质量 |
-| `src/patchpilot/evaluation/metrics.py` | 成功率、失败分类、配对比较、耗时和成本估算 | 指标完整性、未知成本 |
-
-### 测试应该怎么读
-
-测试用于验证设计，不是第一阅读入口。建议按主题挑选：
-
-- `tests/test_task.py`、`tests/test_snapshot.py`：任务和摘要边界。
-- `tests/test_tools.py`、`tests/test_local_tools.py`：工具参数、路径和文件冲突。
-- `tests/test_patching.py`、`tests/test_verification.py`：补丁边界和独立验收。
-- `tests/test_agent.py`、`tests/test_anthropic_model.py`：循环协议、预算和模型适配。
-- `tests/test_chat_session.py`：会话恢复、文件修改基线和目标续跑。
-- `tests/test_service_api.py`、`tests/test_repository.py`、`tests/test_worker.py`：服务状态、租约和 Worker。
-- `tests/test_eval_runner.py`、`tests/test_eval_metrics.py`：评测计划、记录和统计。
-- `tests/test_reference.py`：参考补丁能否通过独立验证；它证明的是验证流水线，不是模型自主修复能力。
-
----
-
-## 四、面试时最值得讲的亮点
-
-### 亮点 1：把 Agent 从“能调用模型”变成“受控的工具协议”
-
-可以这样讲：
-
-> 我没有让模型直接执行任意 shell，而是给它固定的工具 schema。模型只能请求列目录、读文件、搜索、应用补丁、添加回归测试、查看 diff 和运行公开测试。每次调用都要经过严格参数校验、路径白名单、文件大小和结果长度限制，工具结果再以同一个 `tool_use_id` 回到下一轮上下文。
-
-继续追问时讲清：模型决定“想做什么”，运行时决定“能不能做”，不是靠系统提示词保证安全。
-
-### 亮点 2：用快照、摘要和独立工作区保证可复现
-
-可以这样讲：
-
-> 任务先固定源码快照和 SHA-256。Agent 在复制出来的工作区中运行，原始快照不直接被修改；修改前的 `expected_hash` 可以防止模型基于旧版本覆盖文件。验收时不信任 Agent 当前工作区，而是从原始基线重新创建目录、重放封存补丁，再运行同一套测试。
-
-这里的重点不是“用了哈希”这个名词，而是哈希在三个位置形成闭环：
-
-```text
-任务快照身份 -> 工作区基线 -> apply_patch 版本检查 -> 验收报告绑定补丁/基线/候选摘要
-```
-
-### 亮点 3：独立验收避免把模型的完成宣言当成通过
-
-可以这样讲：
-
-> Agent 的 `end_turn` 只代表它结束了候选生成。最终状态由 `verify_patch()` 决定。验证器从基线重建工作区，应用补丁，在 Docker 中运行原测试、公开复现测试和维护者验收，并联合退出码和 JUnit 报告分类；全跳过、零测试、报告缺失和退出码矛盾都不能算通过。
-
-这比“模型说修好了，所以返回成功”更容易让面试官看到工程思维。
-
-### 亮点 4：把失败当作一等状态，并且能解释失败原因
-
-项目没有只返回 `True/False`，而是区分：
-
-- 模型认证、限流、连接和超时错误
-- 工具参数错误、路径拒绝、版本冲突
-- 测试断言失败、收集错误、无测试、全部跳过、超时
-- 工作区或验收材料改变等基础设施错误
-- `unverified`、`rejected`、`failed`、`passed` 等最终状态
-
-面试表达：
-
-> 我优先保证失败可解释和证据可追踪，而不是把所有异常吞掉后返回一个模糊的失败。
-
-### 亮点 5：服务模式处理“旧 Worker 迟到写回”的并发问题
-
-可以这样讲：
-
-> API 只负责创建 queued Run，Worker 用 PostgreSQL 的 `FOR UPDATE SKIP LOCKED` 领取任务。每个 Attempt 有 worker、随机 token 和 lease；心跳续租，所有写事件和终态转换前都重新做 fencing 校验，确认当前 Attempt 仍然拥有租约。这样旧 Worker 即使在网络延迟后恢复，也不能把迟到结果写成当前任务的最终结果。
-
-要补充真实边界：fencing 不能撤销已经发出的模型请求，也不能把文件系统和数据库变成一个分布式事务；它解决的是状态发布的所有权问题。
-
-### 亮点 6：聊天模式把“持续对话”做成可恢复会话
-
-可以这样讲：
-
-> `AgentSession` 持久化消息、目标、用量和文件修改基线。恢复时会补齐未完成的工具结果并暂停目标，不会自动重放旧命令；用户显式 `/goal resume` 后才继续。普通回答不会自动进入目标循环，只有 `/goal` 才会调用无工具评估器判断是否继续。
-
-这能说明你理解会话恢复、幂等和用户授权，而不是只实现了一个无限循环。
-
-### 亮点 7：评测有 baseline，但不夸大实验结论
-
-项目提供：
-
-- 20 项自建合成任务，开发/保留拆分。
-- 固定检索、单次生成、无测试反馈的 baseline。
-- Agent 与 baseline 的配对比较、失败分类、耗时和成本估算。
-- 数据集、代码、工具 schema、镜像和提示词的指纹记录。
-
-正确的面试说法是：
-
-> 我搭建了可复现的评测框架和基线对照，但在没有真实批量 A/B 结果前，不声称模型一定优于 baseline。参考补丁测试通过只证明验证流水线可用，不能当作模型成功率。
-
----
-
-## 五、可以直接用于简历的项目描述
-
-下面这版只使用当前代码已经体现的能力，后续可以根据你真正跑出的数据补充数字：
-
-**PatchPilot｜受控 Python 代码修复 Agent**
-
-- 设计并实现面向固定 Python 任务快照的代码修复 Agent，采用“模型决策—白名单工具—独立验收”链路，支持 Issue 解析、源码检索、候选补丁生成和测试证据记录。
-- 基于 Pydantic 严格工具契约、路径/文件类型白名单、`expected_hash` 版本校验和独立工作区，限制模型只能修改允许的源码范围，并避免基于旧内容覆盖文件。
-- 使用固定 Docker 测试环境执行公开测试、复现测试和维护者验收；从原始快照重建候选工作区，生成绑定 `base/candidate/patch SHA-256` 的可审计报告。
-- 实现本地持续对话模式，支持会话持久化、恢复、目标评估、取消和有限自动续跑；通过 PostgreSQL + Worker 实现任务排队、租约、心跳、fencing、checkpoint 和事件查询。
-- 构建 20 项任务的可复现评测与 baseline 对照框架，记录数据集、代码、工具 schema、镜像和模型用量指纹，区分模型失败、测试失败和基础设施失败。
-
-如果简历只允许两行，可以压缩为：
-
-> 实现受控 Python 修复 Agent：模型仅通过白名单工具操作独立工作区，补丁经 SHA-256 基线校验后在固定 Docker 中独立验收，并产出可追溯的 patch、日志和测试报告。扩展 PostgreSQL + Worker 任务服务，支持租约 fencing、checkpoint 恢复和事件查询。
-
----
-
-## 六、60 秒项目介绍模板
-
-> 我做的是 PatchPilot，一个面向受支持 Python 仓库的代码修复 Agent。它和普通聊天机器人最大的区别是把“模型输出”当作待验证输入：模型只能通过白名单工具读取代码和提交 unified diff，工具层会做参数、路径和文件版本校验，Agent 在独立工作区里运行。候选补丁生成后，系统从固定基线重新创建工作区，在 Docker 中运行公开测试、复现测试和维护者验收，并把补丁摘要、工作区摘要、日志、transcript 和测试报告绑定起来。除此之外，我实现了一个本地持续对话模式，支持会话恢复和显式目标续跑；服务模式使用 PostgreSQL 和独立 Worker 处理任务队列、租约和 checkpoint。这个项目的重点不是宣称模型已经解决所有代码问题，而是让每次动作、失败和最终结论都可控、可解释、可复现。
-
----
-
-## 七、常见追问与回答方向
-
-### 为什么不用多 Agent？
-
-当前问题首先是单个修复循环能否在有限预算下得到可信补丁。多 Agent 会增加消息协议、共享工作区冲突、成本、归因和恢复复杂度；独立验收也不能被多一个模型替代。只有真实任务显示出可分解子问题和可量化收益时，才值得引入规划者或审查者。
-
-### 为什么不用向量数据库？
-
-固定任务快照规模较小，目录枚举、按行读取和精确文本搜索已经足够。向量库会引入切块、索引版本、召回评测和运维成本，而且相似度检索不能替代精确符号和错误文本搜索。
-
-### `environment_id` 能保证安全执行吗？
-
-不能。它是任务配置中的登记字段。真正的执行策略在 `DockerRunner`，包括镜像、网络、资源和命令限制；任务格式校验和沙箱运行是两层不同的责任。
-
-### 为什么既要文件摘要，又要 workspace hash？
-
-聊天模式的 `LocalTools` 在 `write_file` / `edit_file` 中使用文件 `sha256`，防止本地文件被外部修改后覆盖；固定任务模式的 `ToolDispatcher` 在 `apply_patch` 中使用整份工作区的 `expected_hash`，描述补丁所依据的工作区版本。两者分别解决文件级和工作区级的版本一致性。
-
-### 为什么不能直接复用 Agent 当前工作区验收？
-
-因为模型或工具可能改变了不应进入评分的文件，也可能留下未记录的状态。验证器只接收封存补丁，从原始快照重建环境，才能把“候选内容”和“验收环境”分开。
-
-### 服务能保证 exactly-once 吗？
-
-不能这样承诺。租约和 fencing 可以阻止失去所有权的 Worker 发布迟到状态，但不能撤销已发出的模型调用，也不能让文件系统和数据库成为一个分布式事务。项目目标是防止错误状态写回，并让 checkpoint 后的恢复可控。
-
-### 当前项目的限制是什么？
-
-- `agent-run` 是一次有预算的修复循环，不等于无限持续的通用编程助手；持续对话由独立的 `chat` 模式提供。
-- 没有真实批量 A/B 结果时，不能声称 Agent 胜过 baseline。
-- 沙箱面向可信任务，不是对恶意 Python 或公网多租户的形式化安全保证。
-- 本地服务是 PostgreSQL-backed 的任务 API 和 Worker，不是已经具备公网部署、多人隔离和自动运维的平台。
-
-主动讲出这些限制，通常比把原型包装成“全自动软件工程师”更可信。
-
----
-
-## 八、建议的实操学习顺序
-
-在本地可以按这个顺序验证自己的理解：
+3. `src/patchpilot/cli.py`
+4. `src/patchpilot/chat_cli.py`
+5. `docs/architecture.md`
+
+需要确认：
+
+- 安装后只公开 `patchpilot`，且只保留 `chat` 子命令。
+- `--allow-api` 控制是否向模型服务发送请求。
+- `--allow-commands` 单独开放宿主命令。
+- `--allow-harness` 单独开放已配置的 Harness 检查。
+- `--repo` 指定被操作的普通目录；`--resume` 恢复已有会话。
+- 聊天不要求启动 PostgreSQL 或 Docker。
+
+最常用的启动方式是：
 
 ```powershell
-uv sync --locked --link-mode=copy
-uv run --locked patchpilot --help
-
-# 只校验一个固定任务，不调用模型
-uv run --locked patchpilot validate-task benchmarks/tasks/pagination-001/task.json
-
-# 查看面向模型的公开输入
-uv run --locked patchpilot validate-task benchmarks/tasks/pagination-001/task.json --agent-input
-
-# 先读核心单元测试
-uv run --locked pytest tests/test_task.py tests/test_snapshot.py tests/test_tools.py
-uv run --locked pytest tests/test_agent.py tests/test_verification.py
-
-# 需要真实 Docker 时再运行集成测试
-uv run --locked pytest --run-docker
-
-# 本地持续对话（需要显式配置模型并授权）
-uv run --locked patchpilot chat --repo D:\code\My-agent --allow-api
+uv run --locked patchpilot chat `
+  --repo D:\code\My-agent `
+  --allow-api `
+  --allow-commands `
+  --allow-harness
 ```
 
-每读完一层，都尝试用一句话回答：
+### 2. 读模型适配和综合 Agent 提示词
 
-1. **谁决定下一步？** 模型、工具运行时、Docker 执行器还是独立验证器？
-2. **什么时候生效？** 请求前、工具分发时、补丁发布时还是最终验收时？
-3. **状态怎么流动？** 消息、工具结果、工作区摘要、事件、checkpoint 和最终报告分别保存在哪里？
+阅读：
 
-如果这三个问题能沿着 `cli -> task -> workspace -> agent -> tools -> patching -> sandbox -> verification` 讲通，项目主体就已经掌握了；服务和评测再作为可靠性与实验设计的加分项展开。
+1. `src/patchpilot/prompts.py`
+2. `src/patchpilot/runtime.py`
+3. `src/patchpilot/anthropic_model.py`
+4. `src/patchpilot/session.py`
 
+`prompts.py` 将职责拆成三层：
+
+- `AGENT_CORE_PROMPT`：理解目标、阅读证据、谨慎修改、解释风险、不能伪造结果。
+- `CHAT_POLICY_PROMPT`：说明本地文件工具、宿主命令、Harness、用户改动保护和权限边界。
+- `BENCHMARK_POLICY_PROMPT`：只给内部固定任务模式使用，限制公开工作区和独立验收材料。
+
+这样聊天 Agent 是综合开发 Agent，旧固定任务模式仍可以复用相同的核心能力，但不会把固定任务限制错误地套到普通仓库。
+
+`runtime.py` 提供模型调用所需的预算、适配器协议和统一失败类型。`AnthropicModel` 负责 Anthropic 兼容 Messages API、流式响应收集、工具调用协议、超时和错误归类；`AgentSession` 不直接依赖 SDK 细节。
+
+### 3. 读 `AgentSession`：持续对话的核心
+
+重点看 `src/patchpilot/session.py` 的 `submit()`、工具循环、`_call()` 和恢复处理。
+
+一轮提交的大致步骤是：
+
+1. 检查取消信号、时间、模型调用、工具调用和 token 预算。
+2. 用完整历史构造请求，并检查上下文字符上限。
+3. 保存 assistant 响应；如果包含工具调用，逐个分发。
+4. 为每个 `tool_use` 生成同一 ID 的 `tool_result`，再继续请求模型。
+5. 保存文本、工具结果、用量和事件。
+6. 普通回答结束后等待下一个输入；目标模式才交给 `GoalController` 评估。
+
+这里的关键不是一个无限 `while`，而是一个可恢复的会话状态机：消息、工具调用、目标、文件修改基线和用量都能落盘；取消时保留已经发生的修改，并补齐工具结果。
+
+### 4. 读本地工具：模型能做什么由运行时决定
+
+阅读 `src/patchpilot/local_tools.py`。
+
+聊天工具包括：
+
+```text
+list_files          浏览仓库内公开文件
+read_file           分页读取 UTF-8 文本并返回 sha256
+search_text         搜索文本并返回路径、行号和有界结果
+write_file          新建或替换文件
+edit_file           对唯一匹配文本做精确替换
+get_diff            查看本会话文件工具产生的差异
+run_command         在宿主执行用户授权的命令
+run_harness_check   运行已登记的 Harness profile
+```
+
+文件工具的边界：
+
+- 路径必须是仓库内的普通相对路径。
+- 拒绝越界、绝对路径、路径链接和目录联接。
+- 默认跳过凭据、`.env`、依赖目录、缓存、隐藏目录和会话产物。
+- 修改必须携带最近读取的文件摘要；文件被编辑器或其他进程改动后拒绝覆盖。
+- 首次修改会保存原内容，因而非 Git 目录也能查看本会话差异。
+- 不自动提交、重置或清理用户已有改动。
+
+`run_command` 只有在启动参数包含 `--allow-commands` 时才会暴露给模型。Windows 使用 `PowerShell -NoProfile`；底层进程执行器统一限制时长、输出大小，并在取消或超时后回收进程树。
+
+### 5. 读 Harness：把“运行检查”从聊天循环中抽出来
+
+阅读 `src/patchpilot/harness.py`，然后看 `src/patchpilot/process_runner.py`、`src/patchpilot/sandbox.py` 和 `src/patchpilot/verification.py`。
+
+核心对象是：
+
+```text
+HarnessProfile  一个允许执行的检查配置
+HarnessConfig   启动时解析并冻结的配置
+HarnessResult   带证据和状态的结构化结果
+HarnessService  建立快照、选择运行时、执行检查和写报告
+```
+
+优先读取仓库中的 `.patchpilot/harness.toml`，也可以用 `--harness-config` 指定；没有配置时仅对可识别的 Python 项目提供默认 pytest profile。模型只能传入已存在的 profile 名称，不能传任意命令字符串。profile 使用参数数组，拒绝 shell 拼接、管道、重定向和隐式脚本执行；`cwd` 必须位于仓库内。
+
+一次 Harness 检查的流程是：
+
+```text
+当前仓库
+  -> 复制临时快照（包含用户当前改动）
+  -> 记录实际复制内容的 snapshot hash
+  -> 选择 docker / host 运行时
+  -> 执行冻结 profile
+  -> 限制时长和输出，必要时取消进程树
+  -> 写 manifest、profile、日志和 result
+  -> 将结构化结果加入聊天历史
+```
+
+运行时含义：
+
+| runtime | 行为 |
+| --- | --- |
+| `auto` | Docker 镜像可用时优先 Docker；不可用且允许降级时使用宿主 |
+| `docker` | Docker 或镜像不可用直接返回 `infra_error` |
+| `host` | 在宿主的临时副本运行，不需要 Docker |
+
+Docker 结果标记 `isolated=true / evidence_level=sandbox`；宿主结果标记 `isolated=false / evidence_level=local`。宿主检查是本地回归证据，不能描述成独立隔离验收。
+
+`passed` 只表示登记命令返回零退出码，不代表代码绝对正确，也不等于固定任务的维护者隐藏验收结论。检查失败、超时、取消、基础设施错误和清理异常都保留在结果中，不会失败后静默换环境重跑。
+
+### 6. 读 Goal Loop：显式目标才自动推进
+
+阅读 `src/patchpilot/goal.py` 和 `src/patchpilot/session.py` 中的目标调用部分。
+
+交互命令：
+
+```text
+/goal <完成条件>   设置目标并开始执行
+/goal              查看条件、状态、评估次数和用量
+/goal pause        暂停
+/goal resume       显式继续未完成目标
+/goal clear        清除目标但保留聊天历史和文件修改
+```
+
+工作模型可以使用本地工具；评估模型没有工具权限，只检查聊天消息和工具证据，并返回严格的 `ok / reason / impossible` JSON。评估时必须区分：
+
+- Harness 工具调用成功，还是检查本身 `status=passed`；
+- 命令退出码是否符合目标；
+- 证据是否对应当前快照；
+- 结果是宿主本地证据还是 Docker 隔离证据。
+
+目标和评估共用模型预算，评估异常、无法客观验证、取消或预算耗尽时保留目标并暂停；只有 `/goal resume` 才会再次运行。
+
+### 7. 读会话保存与上下文边界
+
+阅读 `src/patchpilot/session_store.py` 和 `src/patchpilot/context.py`。
+
+会话目录默认是启动目录下的 `.patchpilot-sessions/<会话编号>/`，保存：
+
+- 完整消息和工具调用配对结果；
+- 目标状态、评估次数和模型用量；
+- 文件修改前内容及 Harness 元数据；
+- `events.jsonl` 中的模型、工具、目标和检查事件；
+- Harness 的 manifest、冻结 profile、输出尾部和 result。
+
+状态文件采用临时文件替换，同一会话禁止并发打开。恢复时：
+
+- 核对仓库路径；
+- 目标默认暂停；
+- 清空旧的文件读取授权，修改前必须重新读取；
+- 未完成工具调用补记中断结果；
+- 不自动重放旧命令或旧 Harness 检查；
+- `--allow-commands`、`--allow-harness` 等权限需要本次启动重新授予。
+
+`ContextManager` 目前只负责消息追加和容量判断，不会静默删除历史；达到上限时提示使用 `/new`。未来可以在这里增加 `compact()`，而不改变工具协议和会话格式。
+
+## 四、旧固定任务链应该如何理解
+
+旧链路仍可作为内部实现和回归材料阅读，但已经不是公开产品入口：
+
+```text
+内部任务输入
+  -> task.py / snapshot.py / workspace.py
+  -> agent.py 的固定任务 Agent 循环
+  -> tools.py / patching.py
+  -> sandbox.py 与 HarnessService 的基准适配
+  -> verification.py 的 verify_patch 兼容封装
+```
+
+它解决的是固定快照、公开任务工具和独立基准验收；聊天 Agent 不会再嵌套调用这套完整模型循环。`verify_patch()` 只作为内部兼容适配器复用通用 Harness 的执行能力。
+
+旧的 `task.py`、`tools.py`、`evaluation/`、`service/` 和历史测试暂时保留，原因是方便迁移和回归，而不是建议用户启动它们。服务代码仍包含 FastAPI、PostgreSQL、Worker、租约和事件模型；评测代码仍包含数据集、baseline 和指标，但它们不属于聊天的正常产品路径。
+
+## 五、最值得掌握的设计亮点
+
+### 1. 权限由代码控制，不靠提示词自觉
+
+模型只能看到已经开放的工具。是否可以执行宿主命令、是否可以运行 Harness，由启动参数决定；工具分发器还会再次检查参数、路径和状态。
+
+### 2. 文件修改有乐观并发保护
+
+模型先读文件得到 `sha256`，再携带摘要修改。外部编辑导致摘要变化时，运行时拒绝覆盖并要求重新读取。这解决的是“模型基于旧内容写回”的问题。
+
+### 3. Harness 产生的是可追踪证据
+
+结果绑定 profile、实际运行时、退出码、耗时、快照摘要和产物路径。检查在副本中进行，不改变用户当前工作区；报告明确区分宿主证据与 Docker 隔离证据。
+
+### 4. 普通对话和目标循环边界清楚
+
+普通回答不会偷偷触发评估或自动续跑。只有用户显式设置目标，评估器才会检查完成条件；目标暂停和恢复也是显式操作。
+
+### 5. 恢复策略避免重复副作用
+
+恢复会话不会自动重放历史命令或 Harness。旧工具调用会补记为中断，权限和文件读取授权重新建立，避免把未知状态当成成功。
+
+### 6. 失败状态比一个布尔值更重要
+
+模型失败、工具拒绝、文件冲突、命令失败、Harness 超时、基础设施不可用和评估异常分别记录。这样用户能知道下一步是重试、重新读取、修改配置，还是需要人工判断。
+
+## 六、面试时可以这样介绍
+
+> PatchPilot 是一个面向本地仓库的持续对话 Agent。模型通过严格的文件工具读取和修改代码，修改必须携带读取时的文件摘要；命令和 Harness 分别由用户显式授权。Harness 不接受模型临时拼接的命令，而是从冻结 profile 中选择检查，在当前仓库的临时副本执行，并返回带快照摘要、退出码、运行时和产物路径的结构化证据。会话保存完整消息、工具结果、目标状态和修改记录，恢复时不会自动重放旧副作用。旧固定任务和服务代码仍作为内部验证材料保留，但不再是聊天入口。
+
+回答技术追问时始终说明三件事：
+
+1. **谁决定下一步？** 模型提出工具请求，运行时决定是否允许，Harness 产生检查证据。
+2. **什么时候生效？** 权限在启动时生效，文件摘要在修改时校验，检查在模型按需调用时执行，目标评估只在显式 `/goal` 后执行。
+3. **状态怎么流动？** 消息进入上下文，工具结果按 ID 配对，文件修改记录基线，Harness 记录快照和报告，会话存储负责恢复。
+
+## 七、实操验证顺序
+
+```powershell
+# 安装并查看唯一入口
+uv sync --locked
+uv run --locked patchpilot --help
+
+# 不调用模型运行本地回归
+uv run --locked pytest -q
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+
+# 启动只读代码对话
+uv run --locked patchpilot chat --repo D:\code\My-agent --allow-api
+
+# 允许宿主命令，但不允许 Harness
+uv run --locked patchpilot chat `
+  --repo D:\code\My-agent --allow-api --allow-commands
+
+# 允许按需 Harness 检查
+uv run --locked patchpilot chat `
+  --repo D:\code\My-agent --allow-api --allow-commands --allow-harness
+
+# 恢复会话；权限需要重新提供
+uv run --locked patchpilot chat `
+  --resume <会话编号> `
+  --sessions-dir D:\code\My-agent\.patchpilot-sessions `
+  --allow-api --allow-harness
+```
+
+建议用“读取代码 → 修改文件 → 按需运行 Harness → 追问 → 退出 → 恢复”的顺序验证。模拟模型测试只能证明协议和状态流转；真实 API 运行和真实 Docker 检查应单独记录，不能把单元测试通过写成模型已经自主完成修复。
+
+## 八、当前明确限制
+
+- 没有 MCP、多 Agent、后台任务、长期记忆和自动上下文压缩。
+- 宿主命令和宿主 Harness 运行在当前用户权限下；`isolated=false` 的结果不是安全沙箱证明。
+- Harness 不自动安装依赖，也不会在检查失败后换环境重跑。
+- `passed` 只代表已登记检查返回零退出码，不等于完整正确性或隐藏验收通过。
+- 旧服务和评测代码仍在仓库中，但不属于当前用户入口；不要把历史基准报告当成聊天 Agent 的真实成功率。

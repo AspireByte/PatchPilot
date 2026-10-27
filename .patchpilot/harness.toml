@@ -1,0 +1,27 @@
+version = 1
+runtime = "auto"
+default_profile = "test"
+timeout_seconds = 120
+max_output_bytes = 16000
+allow_host_fallback = true
+
+# 产品检查不依赖通用快照默认排除的旧基准答案和维护者验收材料。
+# 当前使用宿主降级；需要 Docker 时请配置包含全部项目依赖的本地镜像。
+[profiles.test]
+argv = [
+    "python", "-m", "pytest", "-q", "-rN", "-p", "no:cacheprovider",
+    "tests/test_chat_session.py",
+    "tests/test_chat_cli.py",
+    "tests/test_chat_harness.py",
+    "tests/test_harness.py",
+    "tests/test_local_tools.py",
+    "tests/test_anthropic_model.py",
+    "tests/test_cli.py",
+    "tests/test_agent_cli.py",
+    "tests/test_execution_cli.py",
+]
+cwd = "."
+
+[profiles.lint]
+argv = ["python", "-m", "ruff", "check", "."]
+cwd = "."

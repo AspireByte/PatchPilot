@@ -69,4 +69,4 @@ jobs:
       - name: PostgreSQL与容器完整回归
         run: uv run --locked pytest --run-postgres --run-docker -q
       - name: 全任务参考补丁验证，不调用模型
-        run: uv run --locked patchpilot-eval validate --output .patchpilot-evals
+        run: uv run --locked python -m patchpilot.evaluation.cli validate --output .patchpilot-evals

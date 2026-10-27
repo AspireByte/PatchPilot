@@ -5,17 +5,15 @@ import hashlib
 import math
 import os
 import shutil
-import signal
-import subprocess
 import tempfile
-import threading
-import time
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from patchpilot.control import ExecutionControl
+from patchpilot.harness import HarnessService
+from patchpilot.process_runner import ProcessStartError, run_process
 
 MAX_FILE_BYTES = 256 * 1024
 MAX_OUTPUT = 16000
@@ -69,6 +67,10 @@ class CommandArgs(Arguments):
     timeout_seconds: float = Field(default=120.0, gt=0, le=600)
 
 
+class HarnessArgs(Arguments):
+    profile: str = Field(default="", min_length=0, max_length=100)
+
+
 SCHEMAS = {
     "list_files": (ListArgs, "列出仓库相对文件路径，默认排除凭据、依赖、缓存与会话产物。"),
     "search_text": (SearchArgs, "在目录内搜索精确文本，返回路径与行号，结果可能截断。"),
@@ -82,6 +84,10 @@ SCHEMAS = {
     "run_command": (
         CommandArgs,
         "在仓库目录运行宿主命令。Windows使用PowerShell -NoProfile；记录退出码和有界输出。",
+    ),
+    "run_harness_check": (
+        HarnessArgs,
+        "运行预先配置的受控项目检查；只能选择已有profile，不修改当前仓库。",
     ),
 }
 
@@ -110,6 +116,8 @@ class LocalTools:
         baselines: dict[str, str | None] | None = None,
         on_change: Callable[[], None] | None = None,
         control: ExecutionControl | None = None,
+        harness: HarnessService | None = None,
+        on_harness_event: Callable[[str, dict], None] | None = None,
     ):
         if repo.is_symlink() or repo.is_junction() or not repo.is_dir():
             raise ValueError("仓库必须是存在的普通目录")
@@ -119,13 +127,34 @@ class LocalTools:
         self.observed: dict[str, str] = {}
         self.on_change = on_change or (lambda: None)
         self.control = control
+        self.harness = harness
+        self.on_harness_event = on_harness_event or (lambda _kind, _values: None)
+        if self.harness is not None:
+            self.harness.control = control
+            self.harness.on_event = self.on_harness_event
 
     def definitions(self) -> list[dict]:
-        return [
+        definitions = [
             {"name": name, "description": description, "input_schema": schema.model_json_schema()}
             for name, (schema, description) in SCHEMAS.items()
-            if name != "run_command" or self.allow_commands
+            if (name != "run_command" or self.allow_commands)
+            and (name != "run_harness_check" or self.harness is not None)
         ]
+        if self.harness is not None:
+            for definition in definitions:
+                if definition["name"] == "run_harness_check":
+                    profiles = list(self.harness.config.profiles)
+                    if profiles:
+                        definition["input_schema"]["properties"]["profile"].update(
+                            enum=profiles, default=self.harness.config.default_profile
+                        )
+                    definition["description"] += (
+                        " 可用profile："
+                        + ", ".join(profiles)
+                        + "；默认："
+                        + self.harness.config.default_profile
+                    )
+        return definitions
 
     def path(self, name: str, *, directory: bool = False) -> Path:
         if name == "." and directory:
@@ -193,6 +222,8 @@ class LocalTools:
         try:
             if name not in SCHEMAS or (name == "run_command" and not self.allow_commands):
                 raise ValueError("未开放该工具；运行命令需要 --allow-commands")
+            if name == "run_harness_check" and self.harness is None:
+                raise ValueError("未开放 Harness 检查；启动时请添加 --allow-harness")
             args = SCHEMAS[name][0].model_validate(arguments)
             if self.control:
                 self.control.check()
@@ -287,6 +318,11 @@ class LocalTools:
             return {"path": args.path, "sha256": digest(new), "bytes": len(new)}
         if name == "get_diff":
             return self.get_diff()
+        if name == "run_harness_check":
+            if self.harness is None:
+                raise ValueError("未开放 Harness 检查；启动时请添加 --allow-harness")
+            result = self.harness.run(args.profile or None, remaining=remaining)
+            return {"harness": result}
         return self._command(args, remaining)
 
     def get_diff(self) -> dict:
@@ -324,94 +360,34 @@ class LocalTools:
             command = [shell, "-NoProfile", "-NonInteractive", "-Command", script]
         else:
             command = ["/bin/sh", "-c", args.command]
-        deadline = time.monotonic() + min(args.timeout_seconds, remaining)
-        output = bytearray()
-        output_size = 0
-        output_lock = threading.Lock()
-        job = None
-
-        def drain(stream) -> None:
-            nonlocal output_size
-            try:
-                while data := stream.read(4096):
-                    with output_lock:
-                        output_size += len(data)
-                        output.extend(data)
-                        del output[:-MAX_OUTPUT]
-            finally:
-                stream.close()
-
         try:
-
-            def spawn():
-                return subprocess.Popen(
+            try:
+                result = run_process(
                     command,
                     cwd=self.repo,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=os.name != "nt",
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                    timeout=min(args.timeout_seconds, remaining),
+                    max_output=MAX_OUTPUT,
+                    control=self.control,
                 )
-
-            try:
-                process = spawn()
-            except OSError:
+            except ProcessStartError:
                 fallback = shutil.which("powershell.exe") if os.name == "nt" else None
                 if not fallback or command[0] == fallback:
                     raise
-                # WindowsApps中存在别名并不代表pwsh能够启动。只在启动失败时回退。
                 command[0] = fallback
-                process = spawn()
-            if os.name == "nt":
-                from patchpilot.process_job import WindowsJob
-
-                try:
-                    job = WindowsJob()
-                    job.assign(process)
-                except OSError:
-                    if job:
-                        job.close()
-                    process.kill()
-                    process.wait(timeout=10)
-                    process.stdout.close()
-                    raise
-            reader = threading.Thread(target=drain, args=(process.stdout,), daemon=True)
-            reader.start()
-            timed_out = False
-            try:
-                while process.poll() is None:
-                    if self.control:
-                        self.control.check()
-                    if time.monotonic() >= deadline:
-                        timed_out = True
-                        break
-                    time.sleep(0.05)
-            finally:
-                # 中断、超时和正常退出均清理同一进程组中的遗留子进程。
-                if job:
-                    job.close()
-                else:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                if process.poll() is None:
-                    process.kill()
-                process.wait(timeout=10)
-                reader.join(timeout=2)
-            with output_lock:
-                text = bytes(output).decode("utf-8", errors="replace")
-                size = output_size
+                result = run_process(
+                    command,
+                    cwd=self.repo,
+                    timeout=min(args.timeout_seconds, remaining),
+                    max_output=MAX_OUTPUT,
+                    control=self.control,
+                )
         finally:
-            if job:
-                job.close()
             self.observed.clear()
         return {
             "command": args.command,
-            "exit_code": None if timed_out else process.returncode,
-            "output": text,
-            "timed_out": timed_out,
-            "truncated": size > MAX_OUTPUT,
+            "exit_code": result.exit_code,
+            "output": result.output,
+            "timed_out": result.timed_out,
+            "truncated": result.truncated,
             "shell": "PowerShell" if os.name == "nt" else "sh",
         }
