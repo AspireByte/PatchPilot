@@ -1,0 +1,11 @@
+{
+  "task_id": "sql-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "073399c2c7154991722cc4683089b7face38642218bd78e1cfdf6b107731550c",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": [
+    "src"
+  ],
+  "test_profile": "pytest-visible-v1"
+}

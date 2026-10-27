@@ -1,0 +1,11 @@
+diff --git a/src/csv_export_demo/cells.py b/src/csv_export_demo/cells.py
+--- a/src/csv_export_demo/cells.py
++++ b/src/csv_export_demo/cells.py
+@@ -4,6 +4,6 @@
+ def escape_cell(value: str) -> str:
+     """保留完整原值，仅在危险文本前添加一个单引号。"""
+     dangerous_prefixes = ("=", "+", "-", "@")
+-    if value.startswith(dangerous_prefixes):
++    if value.lstrip().startswith(dangerous_prefixes):
+         return "'" + value
+     return value

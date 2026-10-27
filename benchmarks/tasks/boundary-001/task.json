@@ -1,0 +1,9 @@
+{
+  "task_id": "boundary-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "8b1c04bfafde77934d948fc99d4f65fbb73d082f107dbfe6ed04db471f7727fa",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": ["src"],
+  "test_profile": "pytest-visible-v1"
+}

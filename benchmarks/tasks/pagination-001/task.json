@@ -1,0 +1,9 @@
+{
+  "task_id": "pagination-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "8c0292a90aa35c5de9a7793b1e6f1bce9b12a349769dbcc4780166685a1db6c9",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": ["src"],
+  "test_profile": "pytest-visible-v1"
+}

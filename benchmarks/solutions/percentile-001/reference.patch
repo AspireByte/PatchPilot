@@ -1,0 +1,10 @@
+diff --git a/src/percentile_demo/stats.py b/src/percentile_demo/stats.py
+--- a/src/percentile_demo/stats.py
++++ b/src/percentile_demo/stats.py
+@@ -20,5 +20,5 @@
+     ):
+         raise ValueError("样本必须是非空的有限数值列表")
+     ordered = sorted(values)
+-    rank = max(1, math.floor(len(ordered) * p / 100))
++    rank = max(1, math.ceil(len(ordered) * p / 100))
+     return ordered[rank - 1]

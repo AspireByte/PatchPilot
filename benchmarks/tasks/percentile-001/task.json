@@ -1,0 +1,9 @@
+{
+  "task_id": "percentile-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "b045d591445f9d9dabddc860e0d163d339160e37dccc496f9e257cc3997a6eba",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": ["src"],
+  "test_profile": "pytest-visible-v1"
+}

@@ -1,0 +1,72 @@
+name: 项目检查与集成验证
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: 安装锁定依赖
+        run: uv sync --locked
+      - name: 格式与静态检查
+        run: |
+          uv run --locked ruff check .
+          uv run --locked ruff format --check .
+      - name: 无模型费用的普通测试
+        run: uv run --locked pytest -q
+      - name: 构建安装包
+        run: uv build --wheel
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+        env:
+          POSTGRES_USER: patchpilot
+          POSTGRES_PASSWORD: patchpilot-local-only
+          POSTGRES_DB: patchpilot
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U patchpilot -d patchpilot"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      PATCHPILOT_TEST_DATABASE_URL: postgresql+psycopg://patchpilot:patchpilot-local-only@127.0.0.1:55432/patchpilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: 安装锁定依赖
+        run: uv sync --locked
+      - name: 预先构建无网络测试镜像
+        run: docker build --tag patchpilot-tests:py312-v1 sandbox
+      - name: PostgreSQL与容器完整回归
+        run: uv run --locked pytest --run-postgres --run-docker -q
+      - name: 全任务参考补丁验证，不调用模型
+        run: uv run --locked patchpilot-eval validate --output .patchpilot-evals

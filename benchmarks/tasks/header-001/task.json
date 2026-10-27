@@ -1,0 +1,9 @@
+{
+  "task_id": "header-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "b96993add376e320c526c70bb98703868210c8ff78b036c4487e786c56b9fbce",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": ["src"],
+  "test_profile": "pytest-visible-v1"
+}

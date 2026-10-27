@@ -1,0 +1,11 @@
+{
+  "task_id": "idempotency-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "2284c10e9ec0bd6c0d3eda65a41ec6ca9401d1021157438d755bec145a499a3a",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": [
+    "src"
+  ],
+  "test_profile": "pytest-visible-v1"
+}

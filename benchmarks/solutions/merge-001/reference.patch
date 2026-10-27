@@ -1,0 +1,20 @@
+diff --git a/src/merge_demo/config.py b/src/merge_demo/config.py
+--- a/src/merge_demo/config.py
++++ b/src/merge_demo/config.py
+@@ -1,12 +1,14 @@
+ """递归合并自建配置字典。"""
++
++from copy import deepcopy
+ 
+ 
+ def merge_config(base: dict, overrides: dict) -> dict:
+     """仅当两边同为字典时递归，其他值由覆盖配置替换。"""
+-    merged = dict(base)
++    merged = deepcopy(base)
+     for key, value in overrides.items():
+         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+             merged[key] = merge_config(merged[key], value)
+         else:
+-            merged[key] = value
++            merged[key] = deepcopy(value)
+     return merged

@@ -1,0 +1,19 @@
+diff --git a/src/unicode_demo/dedupe.py b/src/unicode_demo/dedupe.py
+--- a/src/unicode_demo/dedupe.py
++++ b/src/unicode_demo/dedupe.py
+@@ -1,4 +1,6 @@
+ """按 Unicode 规范化后的身份保留首次出现的原始字符串。"""
++
++from unicodedata import normalize
+ 
+ 
+ def unique_strings(values: list[str]) -> list[str]:
+@@ -6,7 +8,7 @@
+     seen = set()
+     result = []
+     for value in values:
+-        key = value.casefold()
++        key = normalize("NFC", value).casefold()
+         if key not in seen:
+             seen.add(key)
+             result.append(value)

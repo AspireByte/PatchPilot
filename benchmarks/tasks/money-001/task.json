@@ -1,0 +1,11 @@
+{
+  "task_id": "money-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "ccde552d973a8e344aa9a7995e3f8de21d34c82da035a35c845d8e9ee0667f5c",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": [
+    "src"
+  ],
+  "test_profile": "pytest-visible-v1"
+}

@@ -1,0 +1,11 @@
+diff --git a/src/path_demo/membership.py b/src/path_demo/membership.py
+--- a/src/path_demo/membership.py
++++ b/src/path_demo/membership.py
+@@ -13,6 +13,6 @@
+         raise ValueError("路径不得包含父目录段")
+     root_text = str(root_path)
+     candidate_text = str(candidate_path)
+-    if not candidate_text.startswith(root_text):
++    if candidate_path.parts[:len(root_path.parts)] != root_path.parts:
+         return None
+     return candidate_text[len(root_text):].lstrip("/")

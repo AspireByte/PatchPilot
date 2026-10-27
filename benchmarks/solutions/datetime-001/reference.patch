@@ -1,0 +1,9 @@
+diff --git a/src/datetime_demo/timestamps.py b/src/datetime_demo/timestamps.py
+--- a/src/datetime_demo/timestamps.py
++++ b/src/datetime_demo/timestamps.py
+@@ -8,4 +8,4 @@
+     parsed = datetime.fromisoformat(value)
+     if parsed.tzinfo is None:
+         raise ValueError("时间必须包含时区")
+-    return parsed.replace(tzinfo=timezone.utc)
++    return parsed.astimezone(timezone.utc)

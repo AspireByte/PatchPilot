@@ -1,0 +1,27 @@
+{
+  "version": "patchpilot-synthetic-v1",
+  "provenance": "PatchPilot contributors 自建，AI协助编写；以可执行行为测试核验，尚未独立人工逐项审定；无外部真实Issue来源。",
+  "review_status": "draft_requires_human_review",
+  "tasks": [
+    {"task_id":"pagination-001","split":"development","group":"ordering","category":"pagination","source_kind":"synthetic","license":"MIT","expected_behavior":"按时间与编号的字典序分页，不重复或遗漏同时间戳记录。"},
+    {"task_id":"boundary-001","split":"development","group":"range-selection","category":"boundary","source_kind":"synthetic","license":"MIT","expected_behavior":"半开区间[start,end)，保持顺序和重复，不改输入。"},
+    {"task_id":"null-001","split":"development","group":"optional-values","category":"null","source_kind":"synthetic","license":"MIT","expected_behavior":"仅None使用默认标签，保留合法空字符串和空白。"},
+    {"task_id":"validation-001","split":"development","group":"type-validation","category":"validation","source_kind":"synthetic","license":"MIT","expected_behavior":"数量接受合法整数与子类，拒绝bool、非整数及闭区间外值。"},
+    {"task_id":"state-001","split":"development","group":"state-transition","category":"versioning","source_kind":"synthetic","license":"MIT","expected_behavior":"版本匹配时更新并递增，陈旧更新不改变状态。"},
+    {"task_id":"money-001","split":"development","group":"decimal-rounding","category":"money","source_kind":"synthetic","license":"MIT","expected_behavior":"有限十进制金额ROUND_HALF_UP到两位，不受调用者Decimal上下文影响。"},
+    {"task_id":"path-001","split":"holdout","group":"path-containment","category":"path","source_kind":"synthetic","license":"MIT","expected_behavior":"按纯POSIX路径段判定归属，相似前缀兄弟目录不属于根目录。"},
+    {"task_id":"retry-001","split":"development","group":"retry-policy","category":"backoff","source_kind":"synthetic","license":"MIT","expected_behavior":"指数退避min(base*2**attempt,cap)，非法参数拒绝。"},
+    {"task_id":"merge-001","split":"development","group":"data-ownership","category":"configuration","source_kind":"synthetic","license":"MIT","expected_behavior":"递归合并配置，不修改输入且不共享输入可变后代。"},
+    {"task_id":"ranking-001","split":"development","group":"ordering","category":"ranking","source_kind":"synthetic","license":"MIT","expected_behavior":"按score降序和id升序稳定排序，不修改输入。"},
+    {"task_id":"batching-001","split":"holdout","group":"batch-packing","category":"batching","source_kind":"synthetic","license":"MIT","expected_behavior":"按容量顺序贪心分批，不产生空批或溢出，非法条目拒绝。"},
+    {"task_id":"sql-001","split":"holdout","group":"sql-predicate","category":"query","source_kind":"synthetic","license":"MIT","expected_behavior":"只返回active且owner匹配或公开的记录，使用参数绑定。"},
+    {"task_id":"idempotency-001","split":"development","group":"state-transition","category":"idempotency","source_kind":"synthetic","license":"MIT","expected_behavior":"回调成功后登记请求ID，失败可重试，成功重复不再执行。"},
+    {"task_id":"header-001","split":"development","group":"header-lookup","category":"http","source_kind":"synthetic","license":"MIT","expected_behavior":"ASCII头名不区分大小写查询，首匹配优先且保留原值。"},
+    {"task_id":"datetime-001","split":"holdout","group":"timezone","category":"datetime","source_kind":"synthetic","license":"MIT","expected_behavior":"有时区ISO时间转换UTC并保留瞬间与微秒，无时区拒绝。"},
+    {"task_id":"json-lines-001","split":"development","group":"line-provenance","category":"parsing","source_kind":"synthetic","license":"MIT","expected_behavior":"跳过空白JSONL行，首错报告原始物理行号及此前记录。"},
+    {"task_id":"unicode-001","split":"holdout","group":"unicode-normalization","category":"unicode","source_kind":"synthetic","license":"MIT","expected_behavior":"NFC与casefold去重，保留首次原文和顺序。"},
+    {"task_id":"percentile-001","split":"holdout","group":"quantile","category":"statistics","source_kind":"synthetic","license":"MIT","expected_behavior":"nearest-rank上取整分位数，不插值、不改输入，非法请求拒绝。"},
+    {"task_id":"url-path-001","split":"holdout","group":"url-encoding","category":"encoding","source_kind":"synthetic","license":"MIT","expected_behavior":"逐段URL路径转义，段内斜杠、空格、问号和Unicode正确编码。"},
+    {"task_id":"csv-export-001","split":"holdout","group":"csv-safety","category":"export","source_kind":"synthetic","license":"MIT","expected_behavior":"忽略前导空白检测公式前缀，在完整原值前加引号，普通值保留。"}
+  ]
+}

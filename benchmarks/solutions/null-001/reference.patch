@@ -1,0 +1,8 @@
+diff --git a/src/null_demo/labels.py b/src/null_demo/labels.py
+--- a/src/null_demo/labels.py
++++ b/src/null_demo/labels.py
+@@ -4,3 +4,3 @@
+ def resolve_label(value: str | None, *, fallback: str = "未命名") -> str:
+     """缺失标签使用备用值，其余字符串保持原样。"""
+-    return value or fallback
++    return fallback if value is None else value

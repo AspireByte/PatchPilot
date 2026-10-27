@@ -1,0 +1,19 @@
+name: patchpilot
+services:
+  postgres:
+    image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    environment:
+      POSTGRES_USER: patchpilot
+      POSTGRES_PASSWORD: patchpilot-local-only
+      POSTGRES_DB: patchpilot
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patchpilot -d patchpilot"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  postgres_data:

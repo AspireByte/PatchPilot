@@ -1,0 +1,12 @@
+diff --git a/src/sql_demo/visibility.py b/src/sql_demo/visibility.py
+--- a/src/sql_demo/visibility.py
++++ b/src/sql_demo/visibility.py
+@@ -12,7 +12,7 @@
+         )
+         connection.executemany("INSERT INTO records VALUES (?, ?, ?, ?)", records)
+         rows = connection.execute(
+-            "SELECT id FROM records WHERE active = 1 AND owner = ? OR public = 1 ORDER BY id",
++            "SELECT id FROM records WHERE active = 1 AND (owner = ? OR public = 1) ORDER BY id",
+             (owner,),
+         ).fetchall()
+         return [row[0] for row in rows]

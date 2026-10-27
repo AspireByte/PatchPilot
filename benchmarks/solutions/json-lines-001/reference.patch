@@ -1,0 +1,15 @@
+diff --git a/src/json_lines_demo/parser.py b/src/json_lines_demo/parser.py
+--- a/src/json_lines_demo/parser.py
++++ b/src/json_lines_demo/parser.py
+@@ -6,8 +6,9 @@
+ def parse_json_lines(text: str) -> dict:
+     """跳过空白行，首个无效 JSON 返回所在行及此前记录。"""
+     records = []
+-    lines = [line for line in text.splitlines() if line.strip()]
+-    for number, line in enumerate(lines, start=1):
++    for number, line in enumerate(text.splitlines(), start=1):
++        if not line.strip():
++            continue
+         try:
+             records.append(json.loads(line))
+         except json.JSONDecodeError:

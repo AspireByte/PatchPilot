@@ -1,0 +1,10 @@
+diff --git a/src/pagination_demo/paginator.py b/src/pagination_demo/paginator.py
+--- a/src/pagination_demo/paginator.py
++++ b/src/pagination_demo/paginator.py
+@@ -18,5 +18,5 @@ def paginate(
+
+     ordered = sorted(rows, key=lambda row: (row.created_at, row.id))
+     if cursor is not None:
+-        ordered = [row for row in ordered if row.created_at > cursor[0]]
++        ordered = [row for row in ordered if (row.created_at, row.id) > cursor]
+     return ordered[:limit]

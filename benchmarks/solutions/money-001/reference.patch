@@ -1,0 +1,18 @@
+diff --git a/src/money_demo/amount.py b/src/money_demo/amount.py
+--- a/src/money_demo/amount.py
++++ b/src/money_demo/amount.py
+@@ -1,6 +1,6 @@
+ """将十进制金额格式化为两位小数。"""
+ 
+-from decimal import Decimal, InvalidOperation, localcontext
++from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
+ 
+ 
+ def format_money(value: str) -> str:
+@@ -13,5 +13,5 @@
+         raise ValueError("金额必须是有限十进制字符串")
+     with localcontext() as context:
+         context.prec = max(28, len(amount.as_tuple().digits) + abs(amount.as_tuple().exponent) + 2)
+-        rounded = amount.quantize(Decimal("0.01"))
++        rounded = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+     return format(rounded, ".2f")

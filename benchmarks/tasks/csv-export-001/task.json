@@ -1,0 +1,9 @@
+{
+  "task_id": "csv-export-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "d67bbd267e4a687875384a08177b93aa498e79b08b3843e9d8567e07011d0d70",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": ["src"],
+  "test_profile": "pytest-visible-v1"
+}

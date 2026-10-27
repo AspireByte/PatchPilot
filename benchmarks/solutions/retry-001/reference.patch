@@ -1,0 +1,9 @@
+diff --git a/src/retry_demo/schedule.py b/src/retry_demo/schedule.py
+--- a/src/retry_demo/schedule.py
++++ b/src/retry_demo/schedule.py
+@@ -7,4 +7,4 @@
+         raise ValueError("重试参数必须是整数且不能是布尔值")
+     if attempt < 0 or base <= 0 or cap <= 0:
+         raise ValueError("序号不得为负，基数和上限必须为正")
+-    return min(base * (attempt + 1), cap)
++    return min(base * 2**attempt, cap)

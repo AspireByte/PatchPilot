@@ -1,0 +1,10 @@
+diff --git a/src/state_demo/versioned.py b/src/state_demo/versioned.py
+--- a/src/state_demo/versioned.py
++++ b/src/state_demo/versioned.py
+@@ -14,5 +14,6 @@ class VersionedValue:
+         """版本匹配时更新并返回真，否则保持全部状态并返回假。"""
+         if expected_version != self.version:
+             return False
+         self.value = new_value
++        self.version += 1
+         return True

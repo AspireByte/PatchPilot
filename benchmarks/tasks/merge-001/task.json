@@ -1,0 +1,11 @@
+{
+  "task_id": "merge-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "fe0ae8cc68b6c9ef63af5f314b0c734b91fa08193d91d2216270120dd16190bc",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": [
+    "src"
+  ],
+  "test_profile": "pytest-visible-v1"
+}

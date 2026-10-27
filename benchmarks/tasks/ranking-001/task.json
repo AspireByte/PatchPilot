@@ -1,0 +1,11 @@
+{
+  "task_id": "ranking-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "b0def22fbbee66a5d9a905645410c593f4dabab2076f5520f9d42672aab16b31",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": [
+    "src"
+  ],
+  "test_profile": "pytest-visible-v1"
+}

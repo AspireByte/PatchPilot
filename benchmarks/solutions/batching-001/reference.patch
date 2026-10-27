@@ -1,0 +1,19 @@
+diff --git a/src/batching_demo/packer.py b/src/batching_demo/packer.py
+--- a/src/batching_demo/packer.py
++++ b/src/batching_demo/packer.py
+@@ -11,12 +11,12 @@
+     current = []
+     total = 0
+     for size in sizes:
+-        current.append(size)
+-        total += size
+-        if total >= capacity:
++        if current and total + size > capacity:
+             batches.append(current)
+             current = []
+             total = 0
++        current.append(size)
++        total += size
+     if current:
+         batches.append(current)
+     return batches

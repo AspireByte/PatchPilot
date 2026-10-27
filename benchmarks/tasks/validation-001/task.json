@@ -1,0 +1,9 @@
+{
+  "task_id": "validation-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "862b0721887586ecaf863ac7b90f9d5539b6dd1f5a9cbdc2810e3181e6743f4c",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": ["src"],
+  "test_profile": "pytest-visible-v1"
+}

@@ -1,0 +1,9 @@
+diff --git a/src/boundary_demo/window.py b/src/boundary_demo/window.py
+--- a/src/boundary_demo/window.py
++++ b/src/boundary_demo/window.py
+@@ -5,4 +5,4 @@ def select_window(timestamps: list[int], *, start: int, end: int) -> list[int]:
+     """按输入顺序返回区间内的时间戳，不修改输入列表。"""
+     if start > end:
+         raise ValueError("区间起点不能晚于终点")
+-    return [timestamp for timestamp in timestamps if start <= timestamp <= end]
++    return [timestamp for timestamp in timestamps if start <= timestamp < end]

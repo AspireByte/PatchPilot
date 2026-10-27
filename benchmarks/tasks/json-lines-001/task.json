@@ -1,0 +1,9 @@
+{
+  "task_id": "json-lines-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "743b8a984d585b83d83071d68629d1e2be12c8c6c33bed8f51838db82ddb3fd6",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": ["src"],
+  "test_profile": "pytest-visible-v1"
+}

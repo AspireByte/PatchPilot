@@ -1,0 +1,11 @@
+{
+  "task_id": "batching-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "5c91ab91219098f0c3d7fa9d64f721b3f3ada2ff34aa29256ffb960590e9e9f2",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": [
+    "src"
+  ],
+  "test_profile": "pytest-visible-v1"
+}

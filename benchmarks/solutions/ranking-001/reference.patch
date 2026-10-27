@@ -1,0 +1,11 @@
+diff --git a/src/ranking_demo/leaderboard.py b/src/ranking_demo/leaderboard.py
+--- a/src/ranking_demo/leaderboard.py
++++ b/src/ranking_demo/leaderboard.py
+@@ -8,6 +8,5 @@
+     """
+     return sorted(
+         records,
+-        key=lambda record: (record["score"], record["id"]),
+-        reverse=True,
++        key=lambda record: (-record["score"], record["id"]),
+     )

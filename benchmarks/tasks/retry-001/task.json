@@ -1,0 +1,11 @@
+{
+  "task_id": "retry-001",
+  "snapshot_path": "repo",
+  "snapshot_sha256": "5e18e6939ea36efcbba0a4aae5c1030e2b0bf21ac63c1fc32855d45a219dac5b",
+  "issue_path": "Issue.md",
+  "environment_id": "python-pytest-v1",
+  "writable_dirs": [
+    "src"
+  ],
+  "test_profile": "pytest-visible-v1"
+}

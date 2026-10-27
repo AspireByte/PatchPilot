@@ -1,0 +1,11 @@
+diff --git a/src/idempotency_demo/gate.py b/src/idempotency_demo/gate.py
+--- a/src/idempotency_demo/gate.py
++++ b/src/idempotency_demo/gate.py
+@@ -13,6 +13,6 @@
+         """首次成功返回 True，已完成的重复请求不执行且返回 False。"""
+         if request_id in self._completed:
+             return False
++        callback()
+         self._completed.add(request_id)
+-        callback()
+         return True
