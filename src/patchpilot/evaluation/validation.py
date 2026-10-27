@@ -189,6 +189,18 @@ def validate_tasks(
             patch = (solutions_root / item.task_id / "reference.patch").read_bytes()
             verdict = verify_patch(task, patch, case / "g", runner)
             row.update(reference_status=verdict.status, acceptance_sha256=verdict.acceptance_sha256)
+            # 汇总也保留拒绝/基础设施详情；否则 CI 只显示 reference_failed，无法区分补丁格式、快照或容器问题。
+            row["reference_detail"] = verdict.detail
+            if verdict.tests is not None:
+                row["reference_tests"] = {
+                    "status": verdict.tests.status,
+                    "exit_code": verdict.tests.exit_code,
+                    "passed": verdict.tests.passed,
+                    "failed": verdict.tests.failed,
+                    "errors": verdict.tests.errors,
+                    "skipped": verdict.tests.skipped,
+                    "detail": verdict.tests.detail,
+                }
             if (
                 verdict.status != "passed"
                 or compute_snapshot_hash(task.snapshot_root) != task.spec.snapshot_sha256

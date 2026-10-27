@@ -70,3 +70,11 @@ jobs:
         run: uv run --locked pytest --run-postgres --run-docker -q
       - name: 全任务参考补丁验证，不调用模型
         run: uv run --locked python -m patchpilot.evaluation.cli validate --output .patchpilot-evals
+      - name: 上传评测证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patchpilot-validation-${{ github.run_id }}
+          path: .patchpilot-evals
+          if-no-files-found: warn
+          retention-days: 14
