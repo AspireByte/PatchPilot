@@ -7,9 +7,11 @@ from threading import Event, Thread
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from patchpilot.control import ExecutionControl, ExecutionStopped
-from patchpilot.patching import export_diff
-from patchpilot.sandbox import DockerRunner
+from patchpilot.core.control import ExecutionControl, ExecutionStopped
+from patchpilot.legacy.benchmark.patching import export_diff
+from patchpilot.legacy.benchmark.sandbox import DockerRunner
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.workspace import create_workspace
 from patchpilot.service.artifacts import ArtifactStorage, restore_workspace
 from patchpilot.service.catalog import TaskCatalog
 from patchpilot.service.execution import ExecutionHooks
@@ -17,8 +19,6 @@ from patchpilot.service.execution import ExecutionOutput as ExecutionOutput
 from patchpilot.service.executors import AgentExecutor, ReferenceDiagnosticExecutor
 from patchpilot.service.maintenance import reap_and_cleanup
 from patchpilot.service.repository import METADATA_KEYS, USAGE_KEYS, LeaseLost
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.workspace import create_workspace
 
 
 def _label(value):

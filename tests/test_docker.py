@@ -5,16 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.task import load_task
-from patchpilot.workspace import create_workspace
+from patchpilot.legacy.benchmark.task import load_task
+from patchpilot.legacy.benchmark.workspace import create_workspace
 
 CASE = Path(__file__).resolve().parents[1] / "benchmarks/tasks/pagination-001/task.json"
 pytestmark = pytest.mark.docker
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.sandbox"), "尚未实现 Docker 测试执行器"
-    return importlib.import_module("patchpilot.sandbox")
+    assert importlib.util.find_spec("patchpilot.legacy.benchmark.sandbox"), (
+        "尚未实现 Docker 测试执行器"
+    )
+    return importlib.import_module("patchpilot.legacy.benchmark.sandbox")
 
 
 def test_real_container_runs_the_baseline_and_cleans_up(tmp_path: Path) -> None:

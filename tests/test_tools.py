@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.task import load_task
-from patchpilot.workspace import create_workspace
+from patchpilot.legacy.benchmark.task import load_task
+from patchpilot.legacy.benchmark.workspace import create_workspace
 
 CASE = Path(__file__).resolve().parents[1] / "benchmarks/tasks/pagination-001/task.json"
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.tools"), "尚未实现受控工具"
-    return importlib.import_module("patchpilot.tools")
+    assert importlib.util.find_spec("patchpilot.legacy.benchmark.tools"), "尚未实现受控工具"
+    return importlib.import_module("patchpilot.legacy.benchmark.tools")
 
 
 @pytest.fixture

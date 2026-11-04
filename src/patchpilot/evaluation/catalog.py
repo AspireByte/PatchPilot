@@ -7,9 +7,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from patchpilot.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
 
-MANIFEST_PATH = Path(__file__).with_name("dataset.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+MANIFEST_PATH = PROJECT_ROOT / "benchmarks" / "dataset.json"
+ACCEPTANCE_ROOT = PROJECT_ROOT / "benchmarks" / "acceptance"
 
 
 class TaskMetadata(BaseModel):
@@ -64,7 +66,13 @@ class Dataset(BaseModel):
                 return item
         raise ValueError("未知任务编号")
 
-    def fingerprint(self, tasks_root: Path, solutions_root: Path) -> str:
+    def fingerprint(
+        self,
+        tasks_root: Path,
+        solutions_root: Path,
+        acceptance_root: Path | None = None,
+    ) -> str:
+        acceptance_root = acceptance_root or ACCEPTANCE_ROOT
         records = [["metadata", hashlib.sha256(self.model_dump_json().encode()).hexdigest()]]
         license_file = tasks_root.parent / "LICENSE"
         records.append(
@@ -96,7 +104,7 @@ class Dataset(BaseModel):
                 records.append([f"{item.task_id}/{name}", digest])
             for name, path in (
                 ("snapshot", root / "repo"),
-                ("acceptance", acceptance_directory(item.task_id)),
+                ("acceptance", acceptance_directory(item.task_id, acceptance_root)),
             ):
                 try:
                     digest = compute_snapshot_hash(path)
@@ -115,7 +123,7 @@ def load_dataset(path: Path = MANIFEST_PATH) -> Dataset:
 SUPPORTED_TASKS = tuple(item.task_id for item in load_dataset().tasks)
 
 
-def acceptance_directory(task_id: str) -> Path:
+def acceptance_directory(task_id: str, root: Path | None = None) -> Path:
     if task_id not in SUPPORTED_TASKS:
         raise ValueError("未知任务验收配置")
-    return Path(__file__).resolve().parents[1] / "_acceptance" / task_id.replace("-", "_")
+    return (root or ACCEPTANCE_ROOT) / task_id

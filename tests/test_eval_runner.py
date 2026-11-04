@@ -5,9 +5,10 @@ from pathlib import Path
 import pytest
 from test_agent import FakeModel, call, reply
 
-from patchpilot.agent import AgentBudget, ModelFailure
-from patchpilot.anthropic_model import DEFAULT_MODEL
-from patchpilot.sandbox import TestResult as Result
+from patchpilot.core.budget import AgentBudget
+from patchpilot.legacy.benchmark.sandbox import TestResult as Result
+from patchpilot.model.protocol import ModelFailure
+from patchpilot.model.providers.anthropic import DEFAULT_MODEL
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -171,7 +172,7 @@ def test_successful_response_missing_core_usage_is_not_treated_as_free(tmp_path,
 
 def test_environment_failure_is_recorded_for_every_planned_trial(tmp_path):
     module = api()
-    from patchpilot.sandbox import SandboxError
+    from patchpilot.legacy.benchmark.sandbox import SandboxError
 
     class BrokenRunner:
         def __init__(self, *args):

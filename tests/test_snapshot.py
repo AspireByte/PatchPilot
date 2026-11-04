@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
 
 
 def test_hash_matches_the_documented_canonical_representation(tmp_path: Path) -> None:

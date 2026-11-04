@@ -4,8 +4,8 @@ import json
 
 from test_chat_session import ScriptedModel, response
 
-from patchpilot.harness import HarnessService
-from patchpilot.session import AgentSession
+from patchpilot.infrastructure.verification.service import HarnessService
+from patchpilot.session_runtime.session import AgentSession
 
 
 def test_edit_check_goal_followup_and_resume_share_evidence(tmp_path, monkeypatch):
@@ -166,7 +166,7 @@ def test_interrupt_during_harness_pauses_goal_and_saves_result(tmp_path, monkeyp
     def interrupt(*args, **kwargs):
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr("patchpilot.harness.run_process", interrupt)
+    monkeypatch.setattr("patchpilot.infrastructure.verification.service.run_process", interrupt)
     worker = ScriptedModel(response(calls=[("check", "run_harness_check", {"profile": "test"})]))
     session = AgentSession(repo, worker, sessions_root=tmp_path / "sessions", allow_harness=True)
     try:

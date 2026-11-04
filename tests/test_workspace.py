@@ -3,15 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.task import load_task
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.task import load_task
 
 CASE = Path(__file__).resolve().parents[1] / "benchmarks/tasks/pagination-001/task.json"
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.workspace"), "尚未实现独立工作区"
-    return importlib.import_module("patchpilot.workspace")
+    assert importlib.util.find_spec("patchpilot.legacy.benchmark.workspace"), "尚未实现独立工作区"
+    return importlib.import_module("patchpilot.legacy.benchmark.workspace")
 
 
 def test_workspaces_are_unique_and_copy_only_the_verified_repo(tmp_path: Path) -> None:
@@ -41,7 +41,7 @@ def test_output_inside_the_source_is_rejected() -> None:
 def test_changed_source_is_rejected_before_copying(tmp_path: Path) -> None:
     import shutil
 
-    from patchpilot.task import LoadedTask
+    from patchpilot.legacy.benchmark.task import LoadedTask
 
     task = load_task(CASE)
     source = Path(shutil.copytree(task.snapshot_root, tmp_path / "source"))

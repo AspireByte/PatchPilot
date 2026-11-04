@@ -2,7 +2,7 @@
 
 import logging
 
-from patchpilot.sandbox import cleanup_attempt_containers
+from patchpilot.legacy.benchmark.sandbox import cleanup_attempt_containers
 
 logger = logging.getLogger(__name__)
 

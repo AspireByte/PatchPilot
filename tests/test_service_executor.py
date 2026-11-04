@@ -2,12 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.agent import ModelFailure
-from patchpilot.control import ExecutionControl
+from patchpilot.core.control import ExecutionControl
+from patchpilot.legacy.benchmark.task import load_task
+from patchpilot.legacy.benchmark.workspace import create_workspace
+from patchpilot.model.protocol import ModelFailure
 from patchpilot.service import executors
 from patchpilot.service.execution import ExecutionHooks
-from patchpilot.task import load_task
-from patchpilot.workspace import create_workspace
 
 ROOT = Path(__file__).resolve().parents[1]
 

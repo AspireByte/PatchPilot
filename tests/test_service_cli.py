@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from postgres_helpers import pg_repository as pg_repository
 
-from patchpilot.task import load_task
+from patchpilot.legacy.benchmark.task import load_task
 
 ROOT = Path(__file__).resolve().parents[1]
 

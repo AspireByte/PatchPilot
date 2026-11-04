@@ -11,11 +11,11 @@ from pathlib import Path
 
 from patchpilot.evaluation.catalog import acceptance_directory, load_dataset
 from patchpilot.evaluation.runner import write_json
-from patchpilot.sandbox import DEFAULT_IMAGE, DockerRunner
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.task import load_task
-from patchpilot.verification import verify_patch
-from patchpilot.workspace import create_workspace
+from patchpilot.legacy.benchmark.sandbox import DEFAULT_IMAGE, DockerRunner
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.task import load_task
+from patchpilot.legacy.benchmark.verification import verify_patch
+from patchpilot.legacy.benchmark.workspace import create_workspace
 
 
 def _normalized_tokens(source: str) -> list[str]:

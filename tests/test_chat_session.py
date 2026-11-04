@@ -7,8 +7,9 @@ import json
 import pytest
 from anthropic.types import Message
 
-from patchpilot.agent import AgentBudget, ModelFailure
-from patchpilot.session import AgentSession
+from patchpilot.core.budget import AgentBudget
+from patchpilot.model.protocol import ModelFailure
+from patchpilot.session_runtime.session import AgentSession
 
 
 def response(text="回答", *, calls=(), stop=None, tokens=4):
@@ -368,7 +369,7 @@ def test_deadline_stops_before_tools(tmp_path, monkeypatch):
 
     worker = ScriptedModel(slow_response)
     session = make_session(tmp_path, worker)
-    monkeypatch.setattr("patchpilot.session.monotonic", lambda: clock[0])
+    monkeypatch.setattr("patchpilot.session_runtime.session.monotonic", lambda: clock[0])
     try:
         assert session.submit("查看").status == "paused"
         assert session.stats["tool_calls"] == 0

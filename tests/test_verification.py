@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.sandbox import DockerRunner
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.task import load_task
+from patchpilot.legacy.benchmark.sandbox import DockerRunner
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.task import load_task
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE = ROOT / "benchmarks/tasks/pagination-001/task.json"
@@ -16,8 +16,10 @@ PATCH = ROOT / "benchmarks/solutions/pagination-001/reference.patch"
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.verification"), "尚未实现独立补丁验证器"
-    return importlib.import_module("patchpilot.verification")
+    assert importlib.util.find_spec("patchpilot.legacy.benchmark.verification"), (
+        "尚未实现独立补丁验证器"
+    )
+    return importlib.import_module("patchpilot.legacy.benchmark.verification")
 
 
 class MustNotRun:

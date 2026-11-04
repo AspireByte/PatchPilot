@@ -11,8 +11,8 @@ from anthropic.types import Message
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.anthropic_model"), "尚未接入官方SDK适配器"
-    return importlib.import_module("patchpilot.anthropic_model")
+    assert importlib.util.find_spec("patchpilot.model.providers.anthropic"), "尚未接入官方SDK适配器"
+    return importlib.import_module("patchpilot.model.providers.anthropic")
 
 
 def message(stop="tool_use"):
@@ -353,8 +353,8 @@ def test_real_sdk_stream_parser_and_client_reuse_are_exercised_without_network()
 
 
 def test_stream_error_still_saves_final_agent_report(tmp_path: Path) -> None:
-    from patchpilot.agent import run_agent
-    from patchpilot.task import load_task
+    from patchpilot.legacy.benchmark.agent import run_agent
+    from patchpilot.legacy.benchmark.task import load_task
 
     client = FakeClient()
     client.stream = lambda **kwargs: ErrorStream(message())

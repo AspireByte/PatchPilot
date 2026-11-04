@@ -2,7 +2,7 @@
 
 import pytest
 
-from patchpilot.cli import main
+from patchpilot.interfaces.cli.main import main
 
 
 @pytest.mark.parametrize("flag", ["--max-model-calls", "--max-tool-calls", "--max-tokens"])

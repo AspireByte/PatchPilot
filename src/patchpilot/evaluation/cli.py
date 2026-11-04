@@ -6,11 +6,11 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from patchpilot.agent import AgentBudget
-from patchpilot.anthropic_model import DEFAULT_MODEL
+from patchpilot.core.budget import AgentBudget
 from patchpilot.evaluation.metrics import Pricing
 from patchpilot.evaluation.runner import BatchConfig, run_batch, save_summary
 from patchpilot.evaluation.validation import audit_dataset, validate_tasks, write_review
+from patchpilot.model.providers.anthropic import DEFAULT_MODEL
 
 
 def _positive(value):

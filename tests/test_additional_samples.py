@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.task import load_task
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.task import load_task
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = (
@@ -86,7 +86,7 @@ def test_additional_sample_red_and_green(
     task_dir = ROOT / "benchmarks" / "tasks" / task_id
     source = task_dir / "repo"
     patch = ROOT / "benchmarks" / "solutions" / task_id / "reference.patch"
-    acceptance = ROOT / "src" / "patchpilot" / "_acceptance" / acceptance_name
+    acceptance = ROOT / "benchmarks" / "acceptance" / acceptance_name.replace("_", "-")
     assert (task_dir / "task.json").is_file(), f"缺少独立样例：{task_id}"
     task = load_task(task_dir / "task.json")
     assert task.spec.task_id == task_id

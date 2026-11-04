@@ -5,8 +5,8 @@ import pytest
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.control"), "尚未实现执行取消控制"
-    return importlib.import_module("patchpilot.control")
+    assert importlib.util.find_spec("patchpilot.core.control"), "尚未实现执行取消控制"
+    return importlib.import_module("patchpilot.core.control")
 
 
 @pytest.mark.docker
@@ -15,9 +15,9 @@ def test_cancel_terminates_an_active_test_container(tmp_path: Path, monkeypatch)
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
 
-    from patchpilot import sandbox
-    from patchpilot.task import load_task
-    from patchpilot.workspace import create_workspace
+    from patchpilot.legacy.benchmark import sandbox
+    from patchpilot.legacy.benchmark.task import load_task
+    from patchpilot.legacy.benchmark.workspace import create_workspace
 
     control = api().ExecutionControl()
     task = load_task(
@@ -57,7 +57,7 @@ def test_cancel_interrupts_an_inflight_model_stream() -> None:
 
     from test_anthropic_model import FakeClient, SlowStream, message
 
-    from patchpilot.anthropic_model import AnthropicModel
+    from patchpilot.model.providers.anthropic import AnthropicModel
 
     control = api().ExecutionControl()
     stream = SlowStream(message())
@@ -107,8 +107,8 @@ def test_cancel_before_run_makes_no_model_request(tmp_path: Path) -> None:
     module = api()
     from test_agent import FakeModel
 
-    from patchpilot.agent import run_agent
-    from patchpilot.task import load_task
+    from patchpilot.legacy.benchmark.agent import run_agent
+    from patchpilot.legacy.benchmark.task import load_task
 
     control = module.ExecutionControl()
     control.stop("cancelled")

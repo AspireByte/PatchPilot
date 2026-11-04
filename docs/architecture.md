@@ -1,64 +1,103 @@
-# 聊天 Agent 与通用 Harness
+# PatchPilot 整体架构
 
-## 单一用户入口
+## 新 Runtime 内核
 
-`patchpilot chat` 是唯一公开命令。用户通过同一个会话提问、分析代码、修改仓库并按需检查。没有固定任务 Agent 嵌套调用，也不要求 `task.json`、PostgreSQL 或 Docker 才能聊天。
+聊天链路使用稳定的运行时边界：
+
+```text
+CLI / HTTP -> AgentSession -> AgentLoop -> ModelClient -> Provider Adapter
+                                  |
+                                  v
+                           ToolRegistry -> ToolExecutor -> LocalTools / Harness
+```
+
+`core` 只处理模型请求、工具调用配对、预算、取消和生命周期事件；`model` 只负责
+Provider 协议转换；`tools_runtime` 负责工具定义、授权范围和执行结果；`session_runtime`
+预留会话 API、状态编码和版本迁移；`infrastructure` 暴露持久化、进程和验证适配器。
+聊天 Session、工具集合和 Harness 都从这些边界组合，不再依赖旧顶层模块。固定任务的
+实现集中在 `legacy/benchmark`，`service/` 和 `evaluation/` 只通过明确适配器使用它们。
+
+默认上下文策略保留完整历史并只做容量检查；`ContextSource` 和 `Compactor` 作为未来
+Memory、摘要和 token 估算的接入点。事件日志记录执行轨迹，状态文件仍是恢复依据。
+
+## 1. 产品边界
+
+PatchPilot 的唯一公开入口是 `patchpilot chat`。它围绕一个用户指定的本地仓库提供连续对话：模型可以阅读代码、修改普通文本文件、运行用户授权的宿主命令，并按需调用预先登记的 Harness 检查。
+
+聊天 Agent 负责理解用户目标和推进工作；Harness 只负责产生检查证据，不嵌套启动另一个模型 Agent。固定任务、服务和评测模块仍在仓库中，但只作为内部迁移和回归材料。
 
 ```mermaid
 flowchart TD
-    U[用户] --> CLI[chat CLI]
+    U[用户] --> CLI[patchpilot chat]
     CLI --> S[AgentSession]
-    S --> C[ContextManager 完整历史与容量检查]
-    S --> M[模型适配]
+    S --> C[ContextBuilder]
+    S --> M[AnthropicModel]
     S --> T[LocalTools]
-    T --> F[本地文件]
-    T --> P[授权宿主命令]
-    T --> H[HarnessService]
-    H --> SNAP[当前仓库临时快照]
-    SNAP --> D[Docker 检查]
-    SNAP --> HOST[宿主副本检查]
-    H --> E[结构化报告和执行证据]
-    E --> S
-    S --> G[显式 Goal Loop]
-    S --> STORE[SessionStore]
+    T --> F[仓库文件]
+    T --> P[宿主命令]
+    T --> H[VerificationRunner]
+    H --> X[临时快照]
+    X --> D[Docker 检查]
+    X --> L[宿主副本检查]
+    H --> R[结构化 HarnessResult]
+    R --> S
+    S --> G[显式 GoalController]
+    S --> W[SessionStore]
 ```
 
-## 职责与接口
+## 2. 一次请求中的职责分工
 
-| 模块 | 职责 |
+一次普通输入的主链是：
+
+```text
+cli.main
+  -> interfaces.cli.chat.run_chat
+  -> session_runtime.session.AgentSession.submit
+  -> 模型响应
+  -> tools_runtime.builtin.LocalTools.dispatch（可能重复多轮）
+  -> 保存 assistant / tool_result
+  -> 返回回答并等待下一次输入
+```
+
+模型只提出工具请求，不能绕过工具协议直接改文件或注入 Harness 命令。运行时在工具分发时检查：
+
+- 工具是否在本次启动中开放；
+- 参数是否符合严格 schema；
+- 路径是否处于仓库边界内；
+- 文件摘要是否仍与最近一次读取一致；
+- 本轮时间、模型调用、工具调用和 token 预算是否足够。
+
+模型适配层只负责 Anthropic 兼容 Messages API、流式响应和错误归类；会话层不依赖 SDK 的具体对象。`prompts.py` 将综合 Agent 的通用职责与聊天策略分开，旧固定任务模式只额外使用 benchmark 策略。
+
+## 3. 三种状态要分开
+
+### 对话状态
+
+消息、工具调用和工具结果组成模型上下文。每个工具结果都带回原来的 `tool_use_id`，保证模型知道哪个请求产生了哪个观察。
+
+### 工作区状态
+
+聊天直接操作用户仓库。文件工具保存首次修改前内容，修改前要求读取摘要；Harness 则复制当前仓库到临时目录，在副本中执行检查，不把检查过程中的文件变化写回用户目录。
+
+### 证据状态
+
+命令结果和 Harness 结果记录退出码、状态、输出摘要、快照摘要和产物路径。`passed` 只表示登记检查成功，不能被包装成隐藏验收或绝对正确性。
+
+## 4. 关键模块
+
+| 模块 | 主要职责 |
 | --- | --- |
-| `cli.py` / `chat_cli.py` | 交互参数、API/命令/Harness 授权、新建与恢复、中文进度 |
-| `session.py` | 单模型工具循环、调用配对、预算、取消、目标和会话保存 |
-| `runtime.py` / `anthropic_model.py` | 共用预算、模型协议、安全故障分类、Anthropic 兼容请求 |
-| `prompts.py` | 综合开发职责，以及聊天策略与内部基准策略 |
-| `context.py` | 消息追加与容量判断；未来压缩接在此边界，当前保留完整历史 |
-| `local_tools.py` | 公开文件路径、读取摘要、防覆盖、本地工具与 Harness 工具分发 |
-| `harness.py` | profile 配置、当前代码快照、环境选择、检查和报告、内部基准适配 |
-| `process_runner.py` / `process_job.py` | 参数数组执行、输出上限、超时、中断和进程树回收 |
-| `goal.py` / `session_store.py` | 无工具目标评估、完整记录、原子保存和会话锁 |
+| `interfaces/cli` | 参数解析、权限开关、环境文件和交互输入 |
+| `core` | Agent Loop、预算、取消、上下文、事件和内部类型 |
+| `model` | Provider 无关模型端口与 Anthropic 适配器 |
+| `tools_runtime` | 工具注册、schema、执行和内置文件/命令/Harness 工具 |
+| `session_runtime` | 多轮消息、Goal、恢复、ContextBuilder 和状态协调 |
+| `infrastructure/persistence` | version 1 状态保存、事件追加和会话锁 |
+| `infrastructure/process` | 参数数组进程、超时、输出上限和进程树回收 |
+| `infrastructure/verification` | Harness 配置、快照、宿主/Docker 后端和证据产物 |
 
-聊天只依赖通用运行时类型；旧 `agent.py` 使用相同核心提示词和类型，但只承担内部固定任务兼容。综合 Agent 的主循环在 `AgentSession`，不是修改旧循环让它额外充当聊天循环。
+## 5. 当前不属于产品入口的部分
 
-## Harness 的执行边界
+`legacy/benchmark`、`service/` 和 `evaluation/` 保留了固定任务、服务化执行和批量评测能力。它们帮助维护历史回归，但不会被 `chat` 自动调用，也不会向普通用户暴露旧命令。
 
-`run_harness_check(profile)` 只接受登记名称。工具 schema 显示启动时加载的 profile；配置在启动时冻结，工具调用不能通过参数注入新命令。配置、镜像和项目检查脚本属于用户授权的控制面。
-
-Harness 在当前工作区建立临时副本，按实际复制的文件内容绑定摘要，包含用户已有修改和本会话修改，不依赖 Git。manifest 与冻结配置随报告保存。凭据、依赖、缓存、会话产物和维护者材料默认跳过。
-
-`auto` 在配置镜像不可用时可按授权降级宿主；检查开始后失败不会切换环境重试。`docker` 必须隔离执行，`host` 明确标记本地证据。Docker 复用原沙箱的镜像校验，锁定镜像 ID，并限制网络、资源、用户、挂载与清理范围。宿主与原命令工具共用进程执行器。
-
-宿主执行只通过副本隔开正常相对文件写入，不隔离恶意代码。项目脚本仍有当前用户权限，不能用 `isolated=false` 的结果声称已隔离验收。进程环境不直接继承 API 密钥，Python 默认使用当前解释器并优先导入快照路径；依赖需预先准备。
-
-返回的 `passed` 仅意味着本次登记命令退出码为零。一般项目没有独立维护者验收，不能把零退出码或目标评估误写成可信基准评分。失败、超时、取消、基础设施和清理异常分别记录，产物保存在本会话 `harness/` 下。
-
-## 对话、目标与恢复
-
-普通用户提交结束后等待下一次输入。目标模式在工作模型结束时调用独立无工具评估器，评估器检查现有聊天与工具证据，缺少项反馈给工作模型。模型请求和评估请求共享预算；工具时间传递本轮剩余时限。
-
-完整工具调用先落盘，结果随后配对保存。恢复仅补齐缺失结果，不执行历史命令或检查；目标默认暂停，读取摘要授权清空。权限按本次启动重新授予，旧会话仍能恢复。没有自动压缩或静默删除历史；达到上下文阈值后提示 `/new`。
-
-## 内部兼容与扩展
-
-旧 `task.py`、固定任务工具、服务、评测和 Docker pytest 后端保留为内部迁移资料与回归。`verify_patch` 通过统一 Harness 的基准适配入口调用固定快照和维护者验收后端；这个分支不向聊天模型开放，也不成为公开 CLI。
-
-未来压缩通过 `ContextManager` 扩展，MCP 通过 Harness 的薄协议适配层扩展。当前不引入这些功能，也不引入第二个模型 Agent。
+通用检查通过进程内 `VerificationRunner` 运行。固定任务的 acceptance 和 JUnit 分类仍由旧兼容适配器使用；两条链路共享 Docker 能力，但不会把固定任务的完整模型循环嵌入聊天。

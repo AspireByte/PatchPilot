@@ -3,8 +3,8 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from patchpilot.control import ExecutionControl
-from patchpilot.workspace import Workspace
+from patchpilot.core.control import ExecutionControl
+from patchpilot.legacy.benchmark.workspace import Workspace
 
 
 @dataclass(frozen=True)

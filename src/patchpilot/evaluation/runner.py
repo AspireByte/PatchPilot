@@ -12,16 +12,18 @@ from importlib.metadata import version
 from pathlib import Path
 from time import monotonic
 
-from patchpilot.agent import SYSTEM_PROMPT, AgentBudget, ModelFailure, run_agent
-from patchpilot.anthropic_model import DEFAULT_MODEL, AnthropicModel
+from patchpilot.core.budget import AgentBudget
 from patchpilot.evaluation.baseline import BASELINE_SYSTEM, RETRIEVAL_POLICY, run_baseline
 from patchpilot.evaluation.catalog import acceptance_directory, load_dataset
 from patchpilot.evaluation.metrics import TOKEN_FIELDS, Pricing, markdown_summary, summarize
-from patchpilot.sandbox import DEFAULT_IMAGE, DockerRunner
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.task import load_task
-from patchpilot.tools import tool_definitions
-from patchpilot.workspace import create_workspace
+from patchpilot.legacy.benchmark.agent import SYSTEM_PROMPT, run_agent
+from patchpilot.legacy.benchmark.sandbox import DEFAULT_IMAGE, DockerRunner
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.task import load_task
+from patchpilot.legacy.benchmark.tools import tool_definitions
+from patchpilot.legacy.benchmark.workspace import create_workspace
+from patchpilot.model.protocol import ModelFailure
+from patchpilot.model.providers.anthropic import DEFAULT_MODEL, AnthropicModel
 
 
 def _sha(content: bytes) -> str:

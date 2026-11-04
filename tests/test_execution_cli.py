@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.cli import main
+from patchpilot.interfaces.cli.main import main
 
 
 @pytest.mark.parametrize("command", ["verify-patch", "sandbox-check"])
@@ -18,4 +18,4 @@ def test_old_execution_commands_are_rejected(command):
 def test_distribution_exposes_only_chat_cli():
     root = Path(__file__).resolve().parents[1]
     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert data["project"]["scripts"] == {"patchpilot": "patchpilot.cli:main"}
+    assert data["project"]["scripts"] == {"patchpilot": "patchpilot.interfaces.cli.main:main"}

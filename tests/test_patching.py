@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.task import load_task
-from patchpilot.workspace import create_workspace
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.task import load_task
+from patchpilot.legacy.benchmark.workspace import create_workspace
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE = ROOT / "benchmarks/tasks/pagination-001/task.json"
@@ -13,8 +13,8 @@ REFERENCE = ROOT / "benchmarks/solutions/pagination-001/reference.patch"
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.patching"), "尚未实现受控补丁应用"
-    return importlib.import_module("patchpilot.patching")
+    assert importlib.util.find_spec("patchpilot.legacy.benchmark.patching"), "尚未实现受控补丁应用"
+    return importlib.import_module("patchpilot.legacy.benchmark.patching")
 
 
 def test_reference_patch_can_be_exported_and_reapplied(tmp_path: Path) -> None:

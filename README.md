@@ -33,6 +33,44 @@ uv run --locked patchpilot chat --repo D:\code\My-agent --allow-api --allow-comm
 
 不提供后两项时仍可对话和使用文件工具。未授权的执行工具不会暴露给模型。
 
+## 快速理解架构
+
+聊天请求沿着下面的方向流动：
+
+```text
+CLI
+  -> Session
+  -> AgentLoop
+  -> ModelClient / Provider Adapter
+  -> ToolRegistry / ToolExecutor
+  -> 文件工具、宿主进程或 Harness
+```
+
+源码按职责分层：
+
+| 目录 | 职责 |
+| --- | --- |
+| `src/patchpilot/interfaces` | CLI 参数和交互输入输出 |
+| `src/patchpilot/core` | Agent 生命周期、模型—工具循环、预算、上下文、事件和取消 |
+| `src/patchpilot/model` | Provider 无关模型协议与 Anthropic 适配器 |
+| `src/patchpilot/tools_runtime` | 工具注册、schema、权限、执行和内置工具 |
+| `src/patchpilot/session_runtime` | 多轮会话、Goal、恢复和状态协调 |
+| `src/patchpilot/infrastructure` | SessionStore、进程执行、Harness 和验证设施 |
+| `src/patchpilot/legacy/benchmark` | 固定任务、补丁和基准验证旧链路 |
+
+核心 Runtime 只依赖模型和工具协议，因此可以注入 Fake Model、Fake Tool 运行测试，不需要真实模型、Docker 或数据库。固定任务、评测和服务代码与聊天 Runtime 分开，避免把历史任务语义带入通用 Agent。
+
+想快速阅读源码，可以按这个顺序：
+
+1. [interfaces/cli/chat.py](src/patchpilot/interfaces/cli/chat.py)：聊天入口；
+2. [session_runtime/session.py](src/patchpilot/session_runtime/session.py)：Session 如何组织一次提交；
+3. [core/loop.py](src/patchpilot/core/loop.py)：模型与工具的往返循环；
+4. [model/providers/anthropic.py](src/patchpilot/model/providers/anthropic.py)：模型 Provider 适配；
+5. [tools_runtime/builtin/local.py](src/patchpilot/tools_runtime/builtin/local.py)：文件、命令和 Harness 工具；
+6. [infrastructure/persistence/session_store.py](src/patchpilot/infrastructure/persistence/session_store.py)：会话恢复和持久化。
+
+更完整的学习路线见 [learn.md](learn.md)，架构细节见 [docs/architecture.md](docs/architecture.md)。
+
 ## 连续对话与目标
 
 ```text
@@ -66,7 +104,7 @@ uv run --locked patchpilot chat --repo D:\code\My-agent --allow-api --allow-comm
 
 ```toml
 version = 1
-runtime = "auto"
+runtime = "host"
 image = "patchpilot-project:py312"
 default_profile = "test"
 timeout_seconds = 120
@@ -76,13 +114,20 @@ allow_host_fallback = true
 [profiles.test]
 argv = ["python", "-m", "pytest", "-q"]
 cwd = "."
+runtime = "host"
 
 [profiles.lint]
 argv = ["python", "-m", "ruff", "check", "."]
 cwd = "."
+runtime = "host"
+
+[profiles.integration]
+argv = ["python", "-m", "pytest", "-q", "tests/integration"]
+cwd = "."
+runtime = "docker"
 ```
 
-配置在启动时读取并冻结；修改配置后重新启动聊天才会生效。模型只能选择已存在的 profile。命令以参数数组、`shell=False` 执行，拒绝 shell、批处理入口、内联 Python 和拼接字符；可以登记仓库内的检查脚本。`cwd` 必须位于仓库内。配置本身及项目脚本应由你审核。
+配置在启动时读取并冻结；修改配置后重新启动聊天才会生效。模型只能选择已存在的 profile。命令以参数数组、`shell=False` 执行，拒绝 shell、批处理入口、内联 Python 和拼接字符；可以登记仓库内的检查脚本。`cwd` 必须位于仓库内。profile 的 `runtime` 可以覆盖全局设置：普通检查建议使用 `host`，只有需要系统隔离的检查使用 `docker`。配置本身及项目脚本应由你审核。
 
 没有配置时，只为检测到 Python 项目标记或根目录 Python 文件的仓库提供默认 `python -m pytest -q`。依赖使用当前 Python 环境；Harness 不自动安装依赖。其他项目需要显式登记 profile。
 
@@ -92,7 +137,7 @@ cwd = "."
 | `docker` | 必须使用 Docker；缺少引擎或镜像时返回 `infra_error` |
 | `host` | 在宿主上的临时仓库副本执行，不需要 Docker |
 
-`--harness-runtime auto|docker|host` 可覆盖配置；省略则采用配置。镜像需要预先准备、包含 profile 所需依赖，Harness 不下载镜像或联网安装。Docker 使用不可变镜像 ID、无网络、非 root、资源上限和仅挂载临时副本；超时和取消时清理本次容器。
+`--harness-runtime auto|docker|host` 可覆盖配置；省略则采用 profile 或全局配置。默认全局运行时为 `host`，只有 profile 或启动参数明确要求 `docker`（或 `auto` 检测）时才探测 Docker。镜像需要预先准备、包含 profile 所需依赖，Harness 不下载镜像或联网安装。Docker 使用不可变镜像 ID、无网络、非 root、资源上限和仅挂载临时副本；超时和取消时清理本次容器。
 
 运行前复制当前仓库，包括已有用户修改和未提交文件。默认跳过隐藏目录（`.github` 除外）、凭据、依赖、缓存、旧维护者验收及参考答案；快照上限 20000 个文件、100 MiB。检查修改普通相对文件只会作用于副本。**宿主执行不提供安全沙箱，项目脚本仍拥有当前用户权限**；不会向检查环境直接传入模型密钥。
 
@@ -138,6 +183,6 @@ Docker/PostgreSQL 内部回归需要显式传入测试开关；模拟模型测�
 
 ## 实现与历史代码
 
-阅读路线见 [架构说明](docs/architecture.md)。聊天循环、通用模型协议、上下文边界、文件工具和 Harness 已分开，便于后续添加上下文压缩等功能。当前没有 MCP、多 Agent、长期记忆或后台任务。
+架构阅读入口见 [docs 文档导航](docs/README.md)。其中分别说明整体架构、聊天链路、Harness、会话恢复、内部模块边界和开发阅读顺序。当前没有 MCP、多 Agent、长期记忆或后台任务。
 
 旧固定任务、服务、评测代码和历史文档暂留作内部迁移和回归参考。原来的固定任务子命令及服务/评测 console script 已下线，不属于产品用户入口。历史报告不能视为当前能力或真实模型成绩。

@@ -7,8 +7,8 @@ import time
 
 import pytest
 
-from patchpilot.control import ExecutionControl, ExecutionStopped
-from patchpilot.local_tools import MAX_OUTPUT, LocalTools
+from patchpilot.core.control import ExecutionControl, ExecutionStopped
+from patchpilot.tools_runtime.builtin.local import MAX_OUTPUT, LocalTools
 
 
 def test_edit_conflict_protects_external_changes(tmp_path):
@@ -78,7 +78,7 @@ def test_create_edit_and_diff_without_git(tmp_path):
         "secret.pem",
         "a/../b",
         "a//b",
-        "src/patchpilot/_acceptance/test.py",
+        "benchmarks/acceptance/test.py",
         "benchmarks/solutions/answer.patch",
     ],
 )

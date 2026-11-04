@@ -6,8 +6,8 @@ from pathlib import Path
 
 from test_additional_samples import assert_green, run_pytest, snapshot_contents
 
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.task import load_task
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.task import load_task
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,9 +19,7 @@ def verify_sample(task_id: str, tmp_path: Path) -> dict[str, int]:
     before = snapshot_contents(task.snapshot_root)
     workspace = Path(shutil.copytree(task.snapshot_root, tmp_path / "repo"))
     acceptance = Path(
-        shutil.copytree(
-            ROOT / "src/patchpilot/_acceptance" / task_id.replace("-", "_"), tmp_path / "acceptance"
-        )
+        shutil.copytree(ROOT / "benchmarks/acceptance" / task_id, tmp_path / "acceptance")
     )
     normal = assert_green(workspace, tmp_path / "normal.xml", "tests")
     red, red_cases = run_pytest(workspace, tmp_path / "red.xml", "tests", "repro")

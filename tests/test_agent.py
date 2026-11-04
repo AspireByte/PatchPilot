@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from anthropic.types import Message
 
-from patchpilot.sandbox import DockerRunner
-from patchpilot.task import load_task
+from patchpilot.legacy.benchmark.sandbox import DockerRunner
+from patchpilot.legacy.benchmark.task import load_task
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE = ROOT / "benchmarks/tasks/pagination-001/task.json"
@@ -15,8 +15,8 @@ PATCH = ROOT / "benchmarks/solutions/pagination-001/reference.patch"
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.agent"), "尚未实现Agent循环"
-    return importlib.import_module("patchpilot.agent")
+    assert importlib.util.find_spec("patchpilot.legacy.benchmark.agent"), "尚未实现Agent循环"
+    return importlib.import_module("patchpilot.legacy.benchmark.agent")
 
 
 def reply(content=None, stop="tool_use", input_tokens=10, output_tokens=10):

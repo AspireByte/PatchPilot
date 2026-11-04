@@ -6,8 +6,8 @@ import os
 import pytest
 from test_chat_session import ScriptedModel, response
 
-from patchpilot.chat_cli import load_env_file
-from patchpilot.cli import main
+from patchpilot.interfaces.cli.chat import load_env_file
+from patchpilot.interfaces.cli.main import main
 
 
 def test_chat_requires_api_permission(tmp_path, capsys):
@@ -58,7 +58,7 @@ def test_cli_conversation_new_and_resume(tmp_path, monkeypatch, capsys):
         def close(self):
             pass
 
-    monkeypatch.setattr("patchpilot.chat_cli.AnthropicModel", FakeModel)
+    monkeypatch.setattr("patchpilot.interfaces.cli.chat.AnthropicModel", FakeModel)
     root = tmp_path / "sessions"
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -1,5 +1,5 @@
 version = 1
-runtime = "auto"
+runtime = "host"
 default_profile = "test"
 timeout_seconds = 120
 max_output_bytes = 16000
@@ -21,7 +21,9 @@ argv = [
     "tests/test_execution_cli.py",
 ]
 cwd = "."
+runtime = "host"
 
 [profiles.lint]
 argv = ["python", "-m", "ruff", "check", "."]
 cwd = "."
+runtime = "host"

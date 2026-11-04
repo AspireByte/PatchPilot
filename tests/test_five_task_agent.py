@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 from test_agent import FakeModel, call, reply
 
-from patchpilot.agent import run_agent
-from patchpilot.sandbox import DockerRunner
-from patchpilot.task import load_task
+from patchpilot.legacy.benchmark.agent import run_agent
+from patchpilot.legacy.benchmark.sandbox import DockerRunner
+from patchpilot.legacy.benchmark.task import load_task
 
 ROOT = Path(__file__).resolve().parents[1]
 TASKS = ["pagination-001", "boundary-001", "null-001", "validation-001", "state-001"]

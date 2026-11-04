@@ -1,304 +1,260 @@
-# PatchPilot 项目学习与面试讲解路线
+# PatchPilot 快速学习指南
 
-这份文档按当前代码整理。PatchPilot 现在的产品入口只有 `patchpilot chat`：用户围绕一个本地仓库连续提问、阅读代码、修改文件、运行已授权命令，并按需调用受控 Harness 检查。
+这份文档帮助你在较短时间内理解 PatchPilot 当前的产品边界、调用链和源码组织。
+内容以当前代码为准；固定任务、服务和评测属于内部回归链路，不是聊天产品的主入口。
 
-旧的固定任务、服务和评测代码仍保留在仓库中，用于内部迁移和回归参考；它们不再是普通用户的启动方式，也不应和聊天 Agent 混为一条调用链。
+## 1. 项目是什么
 
-## 一、先记住项目定位
+PatchPilot 是一个面向本地代码仓库的持续对话 Agent：
 
-PatchPilot 是一个强调权限、证据和可恢复性的本地代码 Agent 原型。模型负责理解目标、决定下一步和组织工具调用；运行时负责检查参数、权限、路径和预算；Harness 负责在临时副本中执行预先登记的检查；会话层负责保存历史、工具结果、目标状态和恢复信息。
+- 模型负责理解用户目标、决定下一步并提出工具调用；
+- Runtime 负责预算、取消、协议检查、权限和工具结果配对；
+- 工具运行时负责读取和修改文件、执行授权命令、运行 Harness；
+- Session 负责多轮历史、Goal、恢复和持久化；
+- Harness 在临时副本中执行预先登记的检查并生成结构化证据。
 
-它不是只会修改代码的补丁生成器，也不是已经具备公网多租户安全能力的平台。当前综合 Agent 能够解释项目、阅读配置和测试、修改普通文本文件、执行用户授权的宿主命令，并在需要时请求 Harness 产生检查证据。
+它当前不是公网多租户平台，也没有自动安装依赖、长期 Memory、MCP、多 Agent 调度或自动上下文压缩。
 
-## 二、当前唯一产品调用链
+## 2. 先运行起来
 
-```text
-patchpilot chat
-  -> cli.main()
-  -> chat_cli.run_chat()
-  -> AgentSession.submit()
-  -> ContextManager 检查完整上下文容量
-  -> AnthropicModel.complete()
-  -> LocalTools.dispatch()
-       -> list_files / read_file / search_text
-       -> write_file / edit_file / get_diff
-       -> run_command（需要 --allow-commands）
-       -> run_harness_check（需要 --allow-harness）
-  -> 工具结果按 tool_use_id 回到下一轮消息
-  -> SessionStore 保存消息、事件、用量和修改记录
-  -> 普通回答，或显式 /goal 后评估并继续/暂停
+安装依赖：
+
+```powershell
+uv sync --locked
 ```
 
-用户输入一次后，模型可以连续进行多次“模型响应—工具调用—工具结果”循环；普通回答结束后回到输入提示，不会自动进入目标评估。只有输入 `/goal <完成条件>`，才会开启独立、无工具的评估调用和自动续跑。
+查看公开命令：
 
-## 三、推荐的源码阅读顺序
+```powershell
+uv run --locked patchpilot --help
+```
 
-### 1. 先看入口和产品边界
-
-阅读：
-
-1. `README.md`
-2. `pyproject.toml`
-3. `src/patchpilot/cli.py`
-4. `src/patchpilot/chat_cli.py`
-5. `docs/architecture.md`
-
-需要确认：
-
-- 安装后只公开 `patchpilot`，且只保留 `chat` 子命令。
-- `--allow-api` 控制是否向模型服务发送请求。
-- `--allow-commands` 单独开放宿主命令。
-- `--allow-harness` 单独开放已配置的 Harness 检查。
-- `--repo` 指定被操作的普通目录；`--resume` 恢复已有会话。
-- 聊天不要求启动 PostgreSQL 或 Docker。
-
-最常用的启动方式是：
+启动聊天：
 
 ```powershell
 uv run --locked patchpilot chat `
   --repo D:\code\My-agent `
-  --allow-api `
-  --allow-commands `
-  --allow-harness
+  --allow-api
 ```
 
-### 2. 读模型适配和综合 Agent 提示词
-
-阅读：
-
-1. `src/patchpilot/prompts.py`
-2. `src/patchpilot/runtime.py`
-3. `src/patchpilot/anthropic_model.py`
-4. `src/patchpilot/session.py`
-
-`prompts.py` 将职责拆成三层：
-
-- `AGENT_CORE_PROMPT`：理解目标、阅读证据、谨慎修改、解释风险、不能伪造结果。
-- `CHAT_POLICY_PROMPT`：说明本地文件工具、宿主命令、Harness、用户改动保护和权限边界。
-- `BENCHMARK_POLICY_PROMPT`：只给内部固定任务模式使用，限制公开工作区和独立验收材料。
-
-这样聊天 Agent 是综合开发 Agent，旧固定任务模式仍可以复用相同的核心能力，但不会把固定任务限制错误地套到普通仓库。
-
-`runtime.py` 提供模型调用所需的预算、适配器协议和统一失败类型。`AnthropicModel` 负责 Anthropic 兼容 Messages API、流式响应收集、工具调用协议、超时和错误归类；`AgentSession` 不直接依赖 SDK 细节。
-
-### 3. 读 `AgentSession`：持续对话的核心
-
-重点看 `src/patchpilot/session.py` 的 `submit()`、工具循环、`_call()` 和恢复处理。
-
-一轮提交的大致步骤是：
-
-1. 检查取消信号、时间、模型调用、工具调用和 token 预算。
-2. 用完整历史构造请求，并检查上下文字符上限。
-3. 保存 assistant 响应；如果包含工具调用，逐个分发。
-4. 为每个 `tool_use` 生成同一 ID 的 `tool_result`，再继续请求模型。
-5. 保存文本、工具结果、用量和事件。
-6. 普通回答结束后等待下一个输入；目标模式才交给 `GoalController` 评估。
-
-这里的关键不是一个无限 `while`，而是一个可恢复的会话状态机：消息、工具调用、目标、文件修改基线和用量都能落盘；取消时保留已经发生的修改，并补齐工具结果。
-
-### 4. 读本地工具：模型能做什么由运行时决定
-
-阅读 `src/patchpilot/local_tools.py`。
-
-聊天工具包括：
-
-```text
-list_files          浏览仓库内公开文件
-read_file           分页读取 UTF-8 文本并返回 sha256
-search_text         搜索文本并返回路径、行号和有界结果
-write_file          新建或替换文件
-edit_file           对唯一匹配文本做精确替换
-get_diff            查看本会话文件工具产生的差异
-run_command         在宿主执行用户授权的命令
-run_harness_check   运行已登记的 Harness profile
-```
-
-文件工具的边界：
-
-- 路径必须是仓库内的普通相对路径。
-- 拒绝越界、绝对路径、路径链接和目录联接。
-- 默认跳过凭据、`.env`、依赖目录、缓存、隐藏目录和会话产物。
-- 修改必须携带最近读取的文件摘要；文件被编辑器或其他进程改动后拒绝覆盖。
-- 首次修改会保存原内容，因而非 Git 目录也能查看本会话差异。
-- 不自动提交、重置或清理用户已有改动。
-
-`run_command` 只有在启动参数包含 `--allow-commands` 时才会暴露给模型。Windows 使用 `PowerShell -NoProfile`；底层进程执行器统一限制时长、输出大小，并在取消或超时后回收进程树。
-
-### 5. 读 Harness：把“运行检查”从聊天循环中抽出来
-
-阅读 `src/patchpilot/harness.py`，然后看 `src/patchpilot/process_runner.py`、`src/patchpilot/sandbox.py` 和 `src/patchpilot/verification.py`。
-
-核心对象是：
-
-```text
-HarnessProfile  一个允许执行的检查配置
-HarnessConfig   启动时解析并冻结的配置
-HarnessResult   带证据和状态的结构化结果
-HarnessService  建立快照、选择运行时、执行检查和写报告
-```
-
-优先读取仓库中的 `.patchpilot/harness.toml`，也可以用 `--harness-config` 指定；没有配置时仅对可识别的 Python 项目提供默认 pytest profile。模型只能传入已存在的 profile 名称，不能传任意命令字符串。profile 使用参数数组，拒绝 shell 拼接、管道、重定向和隐式脚本执行；`cwd` 必须位于仓库内。
-
-一次 Harness 检查的流程是：
-
-```text
-当前仓库
-  -> 复制临时快照（包含用户当前改动）
-  -> 记录实际复制内容的 snapshot hash
-  -> 选择 docker / host 运行时
-  -> 执行冻结 profile
-  -> 限制时长和输出，必要时取消进程树
-  -> 写 manifest、profile、日志和 result
-  -> 将结构化结果加入聊天历史
-```
-
-运行时含义：
-
-| runtime | 行为 |
-| --- | --- |
-| `auto` | Docker 镜像可用时优先 Docker；不可用且允许降级时使用宿主 |
-| `docker` | Docker 或镜像不可用直接返回 `infra_error` |
-| `host` | 在宿主的临时副本运行，不需要 Docker |
-
-Docker 结果标记 `isolated=true / evidence_level=sandbox`；宿主结果标记 `isolated=false / evidence_level=local`。宿主检查是本地回归证据，不能描述成独立隔离验收。
-
-`passed` 只表示登记命令返回零退出码，不代表代码绝对正确，也不等于固定任务的维护者隐藏验收结论。检查失败、超时、取消、基础设施错误和清理异常都保留在结果中，不会失败后静默换环境重跑。
-
-### 6. 读 Goal Loop：显式目标才自动推进
-
-阅读 `src/patchpilot/goal.py` 和 `src/patchpilot/session.py` 中的目标调用部分。
-
-交互命令：
-
-```text
-/goal <完成条件>   设置目标并开始执行
-/goal              查看条件、状态、评估次数和用量
-/goal pause        暂停
-/goal resume       显式继续未完成目标
-/goal clear        清除目标但保留聊天历史和文件修改
-```
-
-工作模型可以使用本地工具；评估模型没有工具权限，只检查聊天消息和工具证据，并返回严格的 `ok / reason / impossible` JSON。评估时必须区分：
-
-- Harness 工具调用成功，还是检查本身 `status=passed`；
-- 命令退出码是否符合目标；
-- 证据是否对应当前快照；
-- 结果是宿主本地证据还是 Docker 隔离证据。
-
-目标和评估共用模型预算，评估异常、无法客观验证、取消或预算耗尽时保留目标并暂停；只有 `/goal resume` 才会再次运行。
-
-### 7. 读会话保存与上下文边界
-
-阅读 `src/patchpilot/session_store.py` 和 `src/patchpilot/context.py`。
-
-会话目录默认是启动目录下的 `.patchpilot-sessions/<会话编号>/`，保存：
-
-- 完整消息和工具调用配对结果；
-- 目标状态、评估次数和模型用量；
-- 文件修改前内容及 Harness 元数据；
-- `events.jsonl` 中的模型、工具、目标和检查事件；
-- Harness 的 manifest、冻结 profile、输出尾部和 result。
-
-状态文件采用临时文件替换，同一会话禁止并发打开。恢复时：
-
-- 核对仓库路径；
-- 目标默认暂停；
-- 清空旧的文件读取授权，修改前必须重新读取；
-- 未完成工具调用补记中断结果；
-- 不自动重放旧命令或旧 Harness 检查；
-- `--allow-commands`、`--allow-harness` 等权限需要本次启动重新授予。
-
-`ContextManager` 目前只负责消息追加和容量判断，不会静默删除历史；达到上限时提示使用 `/new`。未来可以在这里增加 `compact()`，而不改变工具协议和会话格式。
-
-## 四、旧固定任务链应该如何理解
-
-旧链路仍可作为内部实现和回归材料阅读，但已经不是公开产品入口：
-
-```text
-内部任务输入
-  -> task.py / snapshot.py / workspace.py
-  -> agent.py 的固定任务 Agent 循环
-  -> tools.py / patching.py
-  -> sandbox.py 与 HarnessService 的基准适配
-  -> verification.py 的 verify_patch 兼容封装
-```
-
-它解决的是固定快照、公开任务工具和独立基准验收；聊天 Agent 不会再嵌套调用这套完整模型循环。`verify_patch()` 只作为内部兼容适配器复用通用 Harness 的执行能力。
-
-旧的 `task.py`、`tools.py`、`evaluation/`、`service/` 和历史测试暂时保留，原因是方便迁移和回归，而不是建议用户启动它们。服务代码仍包含 FastAPI、PostgreSQL、Worker、租约和事件模型；评测代码仍包含数据集、baseline 和指标，但它们不属于聊天的正常产品路径。
-
-## 五、最值得掌握的设计亮点
-
-### 1. 权限由代码控制，不靠提示词自觉
-
-模型只能看到已经开放的工具。是否可以执行宿主命令、是否可以运行 Harness，由启动参数决定；工具分发器还会再次检查参数、路径和状态。
-
-### 2. 文件修改有乐观并发保护
-
-模型先读文件得到 `sha256`，再携带摘要修改。外部编辑导致摘要变化时，运行时拒绝覆盖并要求重新读取。这解决的是“模型基于旧内容写回”的问题。
-
-### 3. Harness 产生的是可追踪证据
-
-结果绑定 profile、实际运行时、退出码、耗时、快照摘要和产物路径。检查在副本中进行，不改变用户当前工作区；报告明确区分宿主证据与 Docker 隔离证据。
-
-### 4. 普通对话和目标循环边界清楚
-
-普通回答不会偷偷触发评估或自动续跑。只有用户显式设置目标，评估器才会检查完成条件；目标暂停和恢复也是显式操作。
-
-### 5. 恢复策略避免重复副作用
-
-恢复会话不会自动重放历史命令或 Harness。旧工具调用会补记为中断，权限和文件读取授权重新建立，避免把未知状态当成成功。
-
-### 6. 失败状态比一个布尔值更重要
-
-模型失败、工具拒绝、文件冲突、命令失败、Harness 超时、基础设施不可用和评估异常分别记录。这样用户能知道下一步是重试、重新读取、修改配置，还是需要人工判断。
-
-## 六、面试时可以这样介绍
-
-> PatchPilot 是一个面向本地仓库的持续对话 Agent。模型通过严格的文件工具读取和修改代码，修改必须携带读取时的文件摘要；命令和 Harness 分别由用户显式授权。Harness 不接受模型临时拼接的命令，而是从冻结 profile 中选择检查，在当前仓库的临时副本执行，并返回带快照摘要、退出码、运行时和产物路径的结构化证据。会话保存完整消息、工具结果、目标状态和修改记录，恢复时不会自动重放旧副作用。旧固定任务和服务代码仍作为内部验证材料保留，但不再是聊天入口。
-
-回答技术追问时始终说明三件事：
-
-1. **谁决定下一步？** 模型提出工具请求，运行时决定是否允许，Harness 产生检查证据。
-2. **什么时候生效？** 权限在启动时生效，文件摘要在修改时校验，检查在模型按需调用时执行，目标评估只在显式 `/goal` 后执行。
-3. **状态怎么流动？** 消息进入上下文，工具结果按 ID 配对，文件修改记录基线，Harness 记录快照和报告，会话存储负责恢复。
-
-## 七、实操验证顺序
+权限开关是独立的：
+
+- `--allow-api`：允许请求模型服务；
+- `--allow-commands`：向模型开放宿主命令工具；
+- `--allow-harness`：向模型开放已登记的 Harness 检查；
+- `--resume <id>`：恢复已有会话，但权限需要本次启动重新提供；
+- `--sessions-dir <path>`：指定会话目录。
+
+只读了解项目时可以先不开放命令和 Harness。公开入口只有 `patchpilot chat`；服务和评测仍可通过以下模块启动：
 
 ```powershell
-# 安装并查看唯一入口
-uv sync --locked
-uv run --locked patchpilot --help
-
-# 不调用模型运行本地回归
-uv run --locked pytest -q
-uv run --locked ruff check .
-uv run --locked ruff format --check .
-
-# 启动只读代码对话
-uv run --locked patchpilot chat --repo D:\code\My-agent --allow-api
-
-# 允许宿主命令，但不允许 Harness
-uv run --locked patchpilot chat `
-  --repo D:\code\My-agent --allow-api --allow-commands
-
-# 允许按需 Harness 检查
-uv run --locked patchpilot chat `
-  --repo D:\code\My-agent --allow-api --allow-commands --allow-harness
-
-# 恢复会话；权限需要重新提供
-uv run --locked patchpilot chat `
-  --resume <会话编号> `
-  --sessions-dir D:\code\My-agent\.patchpilot-sessions `
-  --allow-api --allow-harness
+python -m patchpilot.service.cli --help
+python -m patchpilot.evaluation.cli --help
 ```
 
-建议用“读取代码 → 修改文件 → 按需运行 Harness → 追问 → 退出 → 恢复”的顺序验证。模拟模型测试只能证明协议和状态流转；真实 API 运行和真实 Docker 检查应单独记录，不能把单元测试通过写成模型已经自主完成修复。
+## 3. 一次请求的主链路
 
-## 八、当前明确限制
+```text
+patchpilot chat
+  -> interfaces.cli.main.main
+  -> interfaces.cli.chat.run_chat
+  -> session_runtime.session.AgentSession.submit
+  -> core.loop.AgentLoop
+  -> model.protocol.ModelClient
+  -> model.providers.anthropic.AnthropicModel
+  -> tools_runtime.executor.ToolExecutor
+  -> tools_runtime.builtin.LocalTools
+  -> 文件 / 宿主进程 / infrastructure.verification
+```
 
-- 没有 MCP、多 Agent、后台任务、长期记忆和自动上下文压缩。
-- 宿主命令和宿主 Harness 运行在当前用户权限下；`isolated=false` 的结果不是安全沙箱证明。
-- Harness 不自动安装依赖，也不会在检查失败后换环境重跑。
-- `passed` 只代表已登记检查返回零退出码，不等于完整正确性或隐藏验收通过。
-- 旧服务和评测代码仍在仓库中，但不属于当前用户入口；不要把历史基准报告当成聊天 Agent 的真实成功率。
+当模型返回工具调用时，`AgentLoop` 会按顺序执行工具，把每个结果用原来的
+`tool_use_id` 写回消息，再继续请求模型。模型没有直接读写宿主环境的能力；它只能请求当前授权范围内的工具。
+
+普通输入完成后，Session 返回回答并等待下一次输入。只有用户输入 `/goal <完成条件>`，才会启动无工具的评估调用，并根据结果决定继续、暂停或达成。
+
+## 4. 源码目录怎么分
+
+### `src/patchpilot/interfaces`
+
+CLI 和交互层。
+
+- `cli/main.py`：解析顶层命令；
+- `cli/chat.py`：解析聊天参数、创建模型和 `AgentSession`、处理终端输入输出。
+
+这一层可以依赖 Session 和基础设施，但不应把 CLI 逻辑塞进 Core。
+
+### `src/patchpilot/core`
+
+与具体 Provider、数据库和 Web 框架无关的 Runtime 内核。
+
+- `loop.py`：模型请求、工具调用、预算、协议错误、取消和生命周期事件；
+- `agent.py`：Agent 生命周期、订阅和中止；
+- `types.py`：`ModelRequest`、`ModelResponse`、`ToolCall`、用量等内部类型；
+- `budget.py`：模型、工具、token、上下文和时间预算；
+- `context.py`：完整历史构建和容量检查，未来压缩从这里接入；
+- `events.py`：`RuntimeEvent` 及事件接收器；
+- `control.py`：取消和执行停止；
+- `ports.py`：模型、工具和事件的最小协议。
+
+Core 可以注入 Fake Model 和 Fake Tool，因此不需要 Anthropic、Docker、PostgreSQL 或真实仓库也能测试。
+
+### `src/patchpilot/model`
+
+模型端口和 Provider 适配器。
+
+- `protocol.py`：`ModelClient`、`ModelFailure` 和旧关键字模型到内部协议的适配器；
+- `providers/anthropic.py`：Anthropic SDK、流式响应收集、工具 JSON 校验、超时和错误分类。
+
+Core 只接触 `ModelRequest` / `ModelResponse`，不接触 Anthropic SDK 类型。未来增加其他 Provider 时，新增适配器即可。
+
+### `src/patchpilot/tools_runtime`
+
+工具的注册、校验、授权和执行边界。
+
+- `registry.py`：工具名称、说明、schema 和当前授权列表；
+- `executor.py`：参数检查、取消检查、异常转换和结果规范化；
+- `protocol.py`：`ToolContext` 和工具 Provider 协议；
+- `builtin/filesystem.py`：文件参数模型、摘要和公开路径规则；
+- `builtin/process.py`：宿主命令参数；
+- `builtin/harness.py`：Harness 参数；
+- `builtin/local.py`：聊天内置工具集合的组合实现；
+- `builtin/factory.py`：创建内置工具集合的入口。
+
+主要工具：
+
+```text
+list_files          列出公开文件
+read_file           读取 UTF-8 文件并返回 sha256
+search_text         搜索文本
+write_file          新建或替换文件
+edit_file           唯一文本匹配替换
+get_diff            查看本次文件工具修改
+run_command         执行授权的宿主命令
+run_harness_check   选择已登记的 Harness profile
+```
+
+文件修改采用乐观并发保护：先读取文件得到摘要，修改时必须携带最近摘要；文件被外部程序改变后，运行时拒绝覆盖。
+
+### `src/patchpilot/session_runtime`
+
+持续对话和恢复边界。
+
+- `session.py`：`AgentSession`，负责用户消息、斜杠命令、Goal、上下文、事件和保存；
+- `goal.py`：目标状态和严格 JSON 评估结果解析；
+- `state.py`：version 1 状态编码和未来迁移入口；
+- `prompts.py`：通用 Agent 提示词、聊天策略；
+- `api.py`：Session 对外协议；
+- `manager.py`：创建和恢复的轻量工厂边界。
+
+Session 不负责实现 Provider，也不把 Goal 评估塞进通用 `AgentLoop`。普通对话和显式目标循环保持分离。
+
+### `src/patchpilot/infrastructure`
+
+可替换的宿主设施。
+
+- `persistence/session_store.py`：JSON 状态、`events.jsonl`、锁和原子替换；
+- `process/runner.py`、`job.py`：进程启动、超时、输出上限、取消和进程树回收；
+- `verification/config.py`：Harness TOML 和 profile 校验；
+- `verification/runner.py`：快照、宿主/Docker 执行和证据产物；
+- `verification/service.py`：Harness 服务门面；
+- `verification/port.py`：Session 和工具依赖的验证协议。
+
+Harness 配置在会话启动时读取并冻结。模型只能选择 profile 名称，不能临时拼接任意命令。
+
+### `src/patchpilot/legacy/benchmark`
+
+固定任务和基准链路的隔离区：任务解析、旧 Agent、固定任务工具、补丁、工作区、快照、沙箱和独立验证。
+
+这部分保留是为了评测、服务 Worker 和历史回归，不应被 Core Runtime 反向导入。
+
+### `src/patchpilot/evaluation` 与 `src/patchpilot/service`
+
+分别承载批量评测和 FastAPI/PostgreSQL/Worker 服务。它们继续保留公开模块命令，但不属于聊天链路的必需依赖。
+
+## 5. 会话和恢复
+
+默认会话目录为 `.patchpilot-sessions/<session_id>/`，主要文件包括：
+
+- `state.json`：恢复依据，继续使用 version 1 格式；
+- `events.jsonl`：执行轨迹；
+- 修改基线和 Harness 产物：用于 diff、证据和恢复。
+
+恢复时会：
+
+1. 校验仓库路径；
+2. 恢复完整消息和目标状态；
+3. 暂停未完成目标，等待显式 `/goal resume`；
+4. 清空旧的文件读取授权，修改前必须重新读取；
+5. 补齐未完成工具调用的中断结果；
+6. 不自动重放命令或 Harness；
+7. 要求重新提供命令和 Harness 权限。
+
+状态文件用于恢复，事件日志用于追踪，两者职责不同。
+
+## 6. Goal Loop
+
+```text
+/goal <条件>
+  -> 工作模型使用文件/命令/Harness 工具
+  -> 工作轮结束
+  -> 无工具评估模型检查消息和证据
+  -> achieved：结束
+  -> 未完成：追加反馈并继续
+  -> impossible / 中断 / 预算耗尽：paused
+```
+
+评估器只判断现有证据，不执行工具。`run_harness_check` 返回 `ok=true` 只代表工具调用完成，仍要检查嵌套结果的状态、退出码、快照摘要和隔离级别。
+
+## 7. 建议阅读顺序
+
+如果要快速理解项目，按下面顺序阅读：
+
+1. [README.md](README.md)：产品边界和启动方式；
+2. [interfaces/cli/chat.py](src/patchpilot/interfaces/cli/chat.py)：聊天入口；
+3. [session_runtime/session.py](src/patchpilot/session_runtime/session.py)：Session 如何组织一轮提交；
+4. [core/loop.py](src/patchpilot/core/loop.py)：模型—工具循环；
+5. [core/types.py](src/patchpilot/core/types.py)：内部消息和响应格式；
+6. [model/providers/anthropic.py](src/patchpilot/model/providers/anthropic.py)：Provider 适配；
+7. [tools_runtime/builtin/local.py](src/patchpilot/tools_runtime/builtin/local.py)：聊天工具行为和文件保护；
+8. [infrastructure/persistence/session_store.py](src/patchpilot/infrastructure/persistence/session_store.py)：恢复和持久化；
+9. [infrastructure/verification/runner.py](src/patchpilot/infrastructure/verification/runner.py)：Harness 证据链；
+10. [legacy/benchmark/agent.py](src/patchpilot/legacy/benchmark/agent.py)：最后再看固定任务旧链路。
+
+阅读每一层时，始终问三个问题：
+
+- 谁决定下一步：模型、Runtime、工具、Harness 还是用户？
+- 哪个边界检查让动作真正生效：权限、schema、路径、摘要、预算还是 profile？
+- 状态保存在哪里：消息、事件、文件基线、快照 manifest 还是 result？
+
+## 8. 如何验证
+
+不依赖真实模型、Docker 或 PostgreSQL 的本地回归：
+
+```powershell
+uv run --locked pytest -q
+uv run --locked ruff check src tests
+uv run --locked ruff format --check src tests
+```
+
+架构相关测试集中在 `tests/test_runtime_core.py`，覆盖：
+
+- 多轮工具调用和消息配对；
+- 重复工具 ID、未知工具和协议错误；
+- 模型、工具、上下文和取消边界；
+- Tool Registry 和 schema 校验；
+- version 1 状态编解码；
+- Core 不导入 Provider、Web、数据库、Service、Evaluation 或 Legacy。
+
+Docker、PostgreSQL 和真实 Anthropic 测试需要单独的环境和权限，未运行时不能把本地测试通过描述成真实模型或隔离验收通过。
+
+## 9. 面试式总结
+
+> PatchPilot 是一个面向本地仓库的持续对话 Agent。模型通过 Provider 无关的 Runtime 请求工具，工具运行时负责权限、schema、路径和文件摘要保护；Session 保存完整消息、目标和恢复状态；Harness 在临时副本中执行冻结 profile，并返回带快照摘要、退出码和运行时信息的结构化证据。固定任务和服务代码被隔离在 legacy 与独立基础设施边界中，避免污染通用 Agent Runtime。
+
+回答实现细节时，优先说明：
+
+1. 模型只提出动作，Runtime 决定是否执行；
+2. 工具结果按调用 ID 配对，异常和中断不会伪装成成功；
+3. 状态文件用于恢复，事件日志用于追踪；
+4. 宿主检查不是安全沙箱，`isolated=false` 必须如实保留；
+5. 新 Provider、Memory、Compactor、RunStore 和 Evaluation 应通过现有端口接入，而不是重新复制一套模型循环。

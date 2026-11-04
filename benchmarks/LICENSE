@@ -3,10 +3,10 @@ MIT License — PatchPilot synthetic benchmark materials
 Copyright (c) 2026 PatchPilot contributors
 
 Scope: this license applies to the synthetic task materials listed in
-src/patchpilot/evaluation/dataset.json, including their Issue descriptions,
+benchmarks/dataset.json, including their Issue descriptions,
 repo snapshots and tests under benchmarks/tasks, reference patches under
 benchmarks/solutions, and the corresponding maintainer acceptance tests under
-src/patchpilot/_acceptance. It does not, by itself, select a license for the
+benchmarks/acceptance. It does not, by itself, select a license for the
 rest of the PatchPilot application.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

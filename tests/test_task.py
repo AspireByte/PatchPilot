@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot import task
-from patchpilot.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark import task
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
 
 
 @pytest.fixture

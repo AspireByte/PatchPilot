@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.control import ExecutionControl
-from patchpilot.harness import HarnessConfig, HarnessService
-from patchpilot.local_tools import LocalTools
-from patchpilot.process_runner import ProcessResult
+from patchpilot.core.control import ExecutionControl
+from patchpilot.infrastructure.process.runner import ProcessResult
+from patchpilot.infrastructure.verification.service import HarnessConfig, HarnessService
+from patchpilot.tools_runtime.builtin.local import LocalTools
 
 
 def write_config(repo: Path, body: str) -> None:
@@ -171,6 +171,28 @@ def test_configuration_is_frozen_until_restart(tmp_path):
     assert service.run()["status"] == "passed"
 
 
+def test_profile_runtime_defaults_to_host_and_explicit_override_wins(tmp_path, monkeypatch):
+    write_config(
+        tmp_path,
+        'runtime="auto"\n[profiles.test]\nargv=["python", "-V"]\nruntime="host"',
+    )
+    config = HarnessConfig.load(tmp_path)
+    assert config.profiles["test"].runtime == "host"
+    assert HarnessService(tmp_path, config).run()["runtime"] == "host"
+
+    overridden = HarnessConfig.load(tmp_path, runtime_override="docker")
+    monkeypatch.setattr(
+        "patchpilot.infrastructure.verification.service.DockerBackend.check",
+        lambda *args, **kwargs: "sha256:" + "a" * 64,
+    )
+    monkeypatch.setattr(
+        "patchpilot.infrastructure.verification.service.DockerBackend.run",
+        lambda *args, **kwargs: ProcessResult(0, False, "docker", False),
+    )
+    result = HarnessService(tmp_path, overridden).run()
+    assert result["runtime"] == "docker" and result["isolated"]
+
+
 def test_real_failure_cwd_output_limit_and_environment(tmp_path, monkeypatch):
     write_config(
         tmp_path,
@@ -240,8 +262,8 @@ def test_docker_selection_uses_digest_and_cleanup_even_on_timeout(tmp_path, monk
         commands.append(command)
         return subprocess.CompletedProcess(command, 0, b"", b"")
 
-    monkeypatch.setattr("patchpilot.harness.run_process", execute)
-    monkeypatch.setattr("patchpilot.harness.subprocess.run", cleanup)
+    monkeypatch.setattr("patchpilot.infrastructure.verification.service.run_process", execute)
+    monkeypatch.setattr("patchpilot.infrastructure.verification.service.subprocess.run", cleanup)
     result = HarnessService(tmp_path).run()
     assert result["runtime"] == "docker" and result["isolated"]
     assert result["image_id"] == image_id and result["status"] == "timeout"
@@ -271,7 +293,7 @@ def test_exhausted_turn_budget_never_starts_process(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("预算耗尽时不能执行")
 
-    monkeypatch.setattr("patchpilot.harness.run_process", forbidden)
+    monkeypatch.setattr("patchpilot.infrastructure.verification.service.run_process", forbidden)
     result = HarnessService(tmp_path).run(remaining=0)
     assert result["status"] == "timeout" and result["exit_code"] is None
 

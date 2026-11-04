@@ -6,10 +6,10 @@ import re
 import uuid
 from pathlib import Path
 
-from patchpilot.patching import apply_patch
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.task import LoadedTask
-from patchpilot.workspace import Workspace, create_workspace
+from patchpilot.legacy.benchmark.patching import apply_patch
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.task import LoadedTask
+from patchpilot.legacy.benchmark.workspace import Workspace, create_workspace
 
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 

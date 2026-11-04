@@ -2,12 +2,14 @@
 
 from pathlib import Path
 
-from patchpilot.agent import AgentBudget, ModelFailure, run_agent
-from patchpilot.anthropic_model import AnthropicModel
-from patchpilot.patching import apply_patch, export_diff
+from patchpilot.core.budget import AgentBudget
+from patchpilot.legacy.benchmark.agent import run_agent
+from patchpilot.legacy.benchmark.patching import apply_patch, export_diff
+from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
+from patchpilot.legacy.benchmark.verification import verify_patch
+from patchpilot.model.protocol import ModelFailure
+from patchpilot.model.providers.anthropic import AnthropicModel
 from patchpilot.service.execution import ExecutionOutput
-from patchpilot.snapshot import compute_snapshot_hash
-from patchpilot.verification import verify_patch
 
 
 def _log(result) -> tuple[bytes, ...]:

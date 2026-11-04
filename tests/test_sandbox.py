@@ -5,8 +5,10 @@ import pytest
 
 
 def api():
-    assert importlib.util.find_spec("patchpilot.sandbox"), "尚未实现 Docker 测试执行器"
-    return importlib.import_module("patchpilot.sandbox")
+    assert importlib.util.find_spec("patchpilot.legacy.benchmark.sandbox"), (
+        "尚未实现 Docker 测试执行器"
+    )
+    return importlib.import_module("patchpilot.legacy.benchmark.sandbox")
 
 
 @pytest.mark.parametrize(

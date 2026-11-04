@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot.task import load_task
-from patchpilot.workspace import create_workspace
+from patchpilot.legacy.benchmark.task import load_task
+from patchpilot.legacy.benchmark.workspace import create_workspace
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,8 +33,8 @@ def test_artifact_paths_cannot_escape(tmp_path: Path, path: str) -> None:
 
 
 def test_restore_uses_base_and_confirmed_patch_not_old_workspace(tmp_path: Path) -> None:
-    from patchpilot.patching import apply_patch
-    from patchpilot.snapshot import compute_snapshot_hash
+    from patchpilot.legacy.benchmark.patching import apply_patch
+    from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
 
     task = load_task(ROOT / "benchmarks/tasks/pagination-001/task.json")
     original = create_workspace(task, tmp_path / "old")

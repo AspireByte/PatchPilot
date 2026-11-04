@@ -7,8 +7,8 @@ import pytest
 from postgres_helpers import pg_repository as pg_repository
 from sqlalchemy import text
 
+from patchpilot.legacy.benchmark.task import load_task
 from patchpilot.service.config import ServiceSettings
-from patchpilot.task import load_task
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.postgres
@@ -154,7 +154,7 @@ def test_report_publication_failure_does_not_serve_abandoned_patch(
 ) -> None:
     from fastapi.testclient import TestClient
 
-    from patchpilot.patching import apply_patch, export_diff
+    from patchpilot.legacy.benchmark.patching import apply_patch, export_diff
     from patchpilot.service.api import create_app
 
     run = enqueue(pg_repository)
@@ -249,8 +249,8 @@ def test_api_cancel_interrupts_worker_container_and_keeps_partial_patch(
 ) -> None:
     from fastapi.testclient import TestClient
 
-    from patchpilot import sandbox
-    from patchpilot.patching import apply_patch
+    from patchpilot.legacy.benchmark import sandbox
+    from patchpilot.legacy.benchmark.patching import apply_patch
     from patchpilot.service.api import create_app
 
     started = Event()
@@ -313,8 +313,8 @@ class SimulatedCrash(BaseException):
 @pytest.mark.docker
 @pytest.mark.parametrize("point", ["after_read", "patch_not_recorded", "test_not_recorded"])
 def test_restart_rebuilds_only_confirmed_boundary(pg_repository, settings, point) -> None:
-    from patchpilot.patching import apply_patch
-    from patchpilot.snapshot import compute_snapshot_hash
+    from patchpilot.legacy.benchmark.patching import apply_patch
+    from patchpilot.legacy.benchmark.snapshot import compute_snapshot_hash
 
     run = enqueue(pg_repository)
     old_workspace = []

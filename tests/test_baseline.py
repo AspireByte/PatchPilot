@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from test_agent import FakeModel, reply
 
-from patchpilot.agent import AgentBudget
-from patchpilot.task import load_task
+from patchpilot.core.budget import AgentBudget
+from patchpilot.legacy.benchmark.task import load_task
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE = ROOT / "benchmarks/tasks/pagination-001/task.json"
@@ -49,7 +49,7 @@ def test_baseline_stopped_output_is_never_executed(tmp_path, stop):
 
 @pytest.mark.docker
 def test_one_generation_uses_the_same_independent_verifier(tmp_path):
-    from patchpilot.sandbox import DockerRunner
+    from patchpilot.legacy.benchmark.sandbox import DockerRunner
 
     model = FakeModel(
         [reply([{"type": "text", "text": PATCH.read_text(encoding="utf-8")}], stop="end_turn")]

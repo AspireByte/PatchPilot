@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from patchpilot.evaluation.catalog import SUPPORTED_TASKS
-from patchpilot.task import LoadedTask, load_task
+from patchpilot.legacy.benchmark.task import LoadedTask, load_task
 
 
 class TaskCatalog:
