@@ -1,4 +1,5 @@
 import importlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,14 @@ def api():
     return importlib.import_module("patchpilot.legacy.benchmark.patching")
 
 
-def test_reference_patch_can_be_exported_and_reapplied(tmp_path: Path) -> None:
+@pytest.mark.parametrize("inside_repository", [False, True])
+def test_reference_patch_can_be_exported_and_reapplied(
+    tmp_path: Path, monkeypatch, inside_repository: bool
+) -> None:
+    # 覆盖 CI 将评测产物放在项目仓库内的布局，不依赖测试夹具提供的 Git 隔离。
+    monkeypatch.delenv("GIT_CEILING_DIRECTORIES", raising=False)
+    if inside_repository:
+        subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
     module = api()
     task = load_task(CASE)
     workspace = create_workspace(task, tmp_path)

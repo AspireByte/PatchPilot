@@ -89,7 +89,8 @@ def _git(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[bytes]:
         {
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_CEILING_DIRECTORIES": str(cwd.resolve()),
+            # Git 不把当前目录本身作为发现上限，必须在父目录阻止继续寻找项目仓库。
+            "GIT_CEILING_DIRECTORIES": str(cwd.resolve().parent),
         }
     )
     try:
