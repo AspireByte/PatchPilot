@@ -2,10 +2,12 @@
 
 import os
 import re
+import sqlite3
 from contextlib import ExitStack
 from pathlib import Path
 
 from patchpilot.core.budget import AgentBudget
+from patchpilot.infrastructure.persistence.memory_store import SQLiteMemoryStore
 from patchpilot.infrastructure.persistence.session_store import SessionStore
 from patchpilot.model.providers.anthropic import DEFAULT_MODEL, AnthropicModel
 from patchpilot.session_runtime.session import HELP, AgentSession
@@ -23,6 +25,11 @@ def add_chat_parser(commands, add_help, positive_integer, positive_timeout) -> N
         help="会话保存目录，默认相对启动目录",
     )
     parser.add_argument("--allow-api", action="store_true", help="允许发送代码到模型API并产生费用")
+    parser.add_argument("--memory", action="store_true", help="启用原生长期记忆，自动提取共享本轮模型预算")
+    parser.add_argument(
+        "--memory-db", type=Path, default=Path.home() / ".patchpilot" / "memory.sqlite3",
+        help="记忆数据库位置；仅在 --memory 开启时使用",
+    )
     parser.add_argument(
         "--allow-commands",
         action="store_true",
@@ -95,18 +102,27 @@ def show_event(event: dict) -> None:
     kind = event["event"]
     if kind == "assistant_text":
         print(event["text"], flush=True)
+    elif kind == "context_compacted":
+        print(f"[上下文已压缩] {event['before_chars']} → {event['after_chars']} 字符", flush=True)
+    elif kind == "compression_failed":
+        print(f"[上下文压缩失败] {event['reason']}；原文已保留", flush=True)
+    elif kind == "memory_failed":
+        print(f"[长期记忆维护未完成] {event['reason']}；原始会话已保留", flush=True)
+    elif kind == "memory_extracted" and event.get("processed"):
+        print(f"[长期记忆已处理] 候选操作 {event['operations']} 条", flush=True)
     elif kind == "harness_started":
-        print(f"[Harness开始] profile={event['profile']}", flush=True)
+        print(f"[Harness开始哈哈哈] profile={event['profile']}", flush=True)
     elif kind == "harness_finished":
         print(
             f"[Harness完成] {event['status']} / {event['runtime']} / 退出码 {event['exit_code']}",
             flush=True,
         )
     elif kind == "model_started":
-        print("[目标评估中]" if event["kind"] == "evaluator" else "[模型处理中]", flush=True)
+        label = {"evaluator": "[目标评估中哈哈]", "memory": "[长期记忆提取中]"}
+        print(label.get(event["kind"], "[模型处理中]"), flush=True)
     elif kind == "tool_started":
         command = event.get("command")
-        print(f"[工具] {event['tool']}" + (f"\n{command}" if command else ""), flush=True)
+        print(f"[工具哈哈哈哈] {event['tool']}" + (f"\n{command}" if command else ""), flush=True)
     elif kind == "tool_finished":
         result = event["result"]
         if "harness" in result:
@@ -153,6 +169,14 @@ def run_chat(arguments) -> int:
         store = SessionStore(arguments.sessions_dir, arguments.resume)
         stack.callback(store.close)
         saved = store.load() if arguments.resume else {}
+        memory_backend, memory_error = None, ""
+        if arguments.memory:
+            try:
+                memory_backend = SQLiteMemoryStore(arguments.memory_db)
+                stack.callback(memory_backend.close)
+            except (sqlite3.Error, OSError, ValueError) as error:
+                memory_error = str(error)[:1000]
+                print(f"[长期记忆不可用] {memory_error}；继续普通聊天。")
         model_name = arguments.model or saved.get("model") or DEFAULT_MODEL
         evaluator_name = (
             arguments.evaluator_model
@@ -179,6 +203,8 @@ def run_chat(arguments) -> int:
             budget=budget,
             max_continuations=arguments.max_continuations,
             on_event=show_event,
+            memory_backend=memory_backend,
+            memory_error=memory_error,
         )
         try:
             while True:
@@ -214,6 +240,8 @@ def run_chat(arguments) -> int:
                             budget=budget,
                             max_continuations=arguments.max_continuations,
                             on_event=show_event,
+                            memory_backend=memory_backend,
+                            memory_error=memory_error,
                         )
                         break
                     if result.status in ("status", "error", "cleared") and result.text:

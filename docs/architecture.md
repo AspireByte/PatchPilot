@@ -1,4 +1,4 @@
-# PatchPilot 整体架构
+# myagent 整体架构
 
 ## 新 Runtime 内核
 
@@ -17,18 +17,26 @@ Provider 协议转换；`tools_runtime` 负责工具定义、授权范围和执�
 聊天 Session、工具集合和 Harness 都从这些边界组合，不再依赖旧顶层模块。固定任务的
 实现集中在 `legacy/benchmark`，`service/` 和 `evaluation/` 只通过明确适配器使用它们。
 
-默认上下文策略保留完整历史并只做容量检查；`ContextSource` 和 `Compactor` 作为未来
-Memory、摘要和 token 估算的接入点。事件日志记录执行轨迹，状态文件仍是恢复依据。
+聊天 Session 默认注入 `HistoryCompactor`：原始历史与发送视图分离，模型生成摘要，内核
+负责范围、工具配对、最近轮次保护和多层块合并。`ContextBuilder.fits()` 只读，
+`build()` 才自动压缩。独立使用 Runtime 时仍可选择 `NoopCompactor`。
+压缩状态与原始历史共同落盘；事件日志记录执行轨迹，状态文件仍是恢复依据。
+具体协议和边界见 [上下文压缩](context-compression.md)。
+
+显式开启 `--memory` 后，Session 通过独立记忆后端保存全局偏好和项目记忆。
+每轮只召回一次并生成只读 `ContextSource` 快照，工作模型和评估器使用相同来源；
+回答完成后复用本轮预算提取原始消息，SQLite 事务统一提交记忆、索引及水位。
+记忆维护失败不改变已经完成的回答。详见 [原生长期记忆](memory.md)。
 
 ## 1. 产品边界
 
-PatchPilot 的唯一公开入口是 `patchpilot chat`。它围绕一个用户指定的本地仓库提供连续对话：模型可以阅读代码、修改普通文本文件、运行用户授权的宿主命令，并按需调用预先登记的 Harness 检查。
+myagent 的唯一公开入口是 `myagent chat`。它围绕一个用户指定的本地仓库提供连续对话：模型可以阅读代码、修改普通文本文件、运行用户授权的宿主命令，并按需调用预先登记的 Harness 检查。
 
 聊天 Agent 负责理解用户目标和推进工作；Harness 只负责产生检查证据，不嵌套启动另一个模型 Agent。固定任务、服务和评测模块仍在仓库中，但只作为内部迁移和回归材料。
 
 ```mermaid
 flowchart TD
-    U[用户] --> CLI[patchpilot chat]
+    U[用户] --> CLI[myagent chat]
     CLI --> S[AgentSession]
     S --> C[ContextBuilder]
     S --> M[AnthropicModel]

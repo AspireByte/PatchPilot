@@ -11,6 +11,7 @@ allow_host_fallback = true
 argv = [
     "python", "-m", "pytest", "-q", "-rN", "-p", "no:cacheprovider",
     "tests/test_chat_session.py",
+    "tests/test_context_compression.py",
     "tests/test_chat_cli.py",
     "tests/test_chat_harness.py",
     "tests/test_harness.py",

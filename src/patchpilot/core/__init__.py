@@ -2,6 +2,7 @@
 
 from .agent import Agent
 from .budget import AgentBudget
+from .compression import CompressionBlock, HistoryCompactor
 from .context import Compactor, ContextBuilder, ContextLimitReached, ContextSource, NoopCompactor
 from .control import ExecutionControl, ExecutionStopped
 from .events import EventSink, RuntimeEvent
@@ -14,12 +15,14 @@ __all__ = [
     "AgentBudget",
     "AgentLoop",
     "Compactor",
+    "CompressionBlock",
     "ContextBuilder",
     "ContextLimitReached",
     "ContextSource",
     "EventSink",
     "ExecutionControl",
     "ExecutionStopped",
+    "HistoryCompactor",
     "EventPort",
     "LoopResult",
     "LoopStopped",

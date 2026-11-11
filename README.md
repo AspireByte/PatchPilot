@@ -1,6 +1,6 @@
-# PatchPilot
+# myagent
 
-面向本地仓库的持续对话 Agent。你可以连续提问、阅读代码、修改文件、运行宿主命令，并按需调用 Harness 检查当前代码。`patchpilot chat` 是唯一公开用户入口，无需先启动数据库或 Docker。
+面向本地仓库的持续对话 Agent。你可以连续提问、阅读代码、修改文件、运行宿主命令，并按需调用 Harness 检查当前代码。`myagent chat` 是唯一公开用户入口，无需先启动数据库或 Docker。
 
 ## 安装与启动
 
@@ -16,8 +16,18 @@ uv sync --locked
 $env:ANTHROPIC_API_KEY = "你的API密钥"
 # 使用 Anthropic 兼容服务时设置；默认使用官方地址。
 # $env:ANTHROPIC_BASE_URL = "https://你的服务地址"
-uv run --locked patchpilot chat --repo D:\code\My-agent --allow-api --allow-commands --allow-harness
+uv run --locked myagent chat --repo D:\code\My-agent --allow-api --allow-commands --allow-harness
 ```
+
+在其他目录启动时，必须用 `--project` 指定 myagent 的安装项目。下面这条命令可直接在 `D:\code\agent\Test` 等目录运行，并启用长期记忆：
+
+```powershell
+uv run --project D:\code\My-agent --locked myagent chat --repo D:\code\My-agent --allow-api --memory --env-file D:\code\My-agent\.env
+```
+
+`--project` 指向本程序的 `pyproject.toml` 所在目录，`--repo` 指向希望操作的目标仓库；例如操作当前测试仓库时，将后者改为 `D:\code\agent\Test`。如果没有配置 `.env`，省略 `--env-file` 并使用环境变量。仅传 `--repo` 不会让 uv 找到本程序，可能出现 `program not found`。
+
+项目发行名和主命令现为 `myagent`；旧 `patchpilot` 命令仍可使用，兼容已有快捷脚本。内部 Python 包名 `patchpilot`、`.patchpilot-sessions`、`.patchpilot/harness.toml` 和 `~/.patchpilot/memory.sqlite3` 保留，已有会话与记忆无需迁移。
 
 也可复制 [.env.example](.env.example) 为 `.env`，再显式添加 `--env-file .env`。已有环境变量优先，不自动加载目标仓库的 `.env`。支持单行 `KEY=VALUE`、单双引号和 `export` 前缀，不执行脚本或展开变量。
 
@@ -84,15 +94,22 @@ CLI
 你 > /goal clear
 你 > /diff
 你 > /status
+你 > /compact
 你 > /new
 你 > /exit
 ```
 
 普通回答后回到输入提示；只有显式设置 `/goal <条件>` 才启用目标评估和自动续跑。工作模型负责执行，独立无工具评估调用根据现有证据判断是否完成。遇到无法验证、需要澄清、预算耗尽、评估异常或取消时暂停；使用 `/goal resume` 显式继续。
 
-执行中 `Ctrl+C` 取消请求或命令进程树，保留文件修改后回到提示；等待输入时 `Ctrl+C` 保存退出。`/new` 开启新会话并保留磁盘修改。上下文达到上限时提示开启新会话，当前没有自动上下文压缩。
+执行中 `Ctrl+C` 取消请求或命令进程树，保留文件修改后回到提示；等待输入时 `Ctrl+C` 保存退出。`/new` 开启新会话并保留磁盘修改。
+
+会话在历史视图达到可用字符预算的 80% 时自动压缩旧历史，尽量降到 60%；也可输入 `/compact` 手动触发。摘要由当前工作模型生成并计入本轮预算。最近至少 6 条消息和当前用户轮次保持原样，工具调用及结果成组处理。原始历史永久保留，模型只接收摘要视图；目标评估也使用该视图。失败时保留已提交的视图并停止，不自动丢弃消息。若最近轮次本身过大，仍需调整预算或使用 `/new`。实现细节见 [上下文压缩](docs/context-compression.md)。
 
 文件工具支持浏览、搜索、分页读取、新建、精确替换和差异。修改前必须先读取并携带摘要，外部变化会导致拒绝覆盖。默认跳过凭据、链接、依赖、缓存和会话产物。`/diff` 只跟踪当前会话文件工具的修改；命令或外部编辑器产生的修改需要额外检查。
+
+## 原生长期记忆
+
+使用 `--memory` 可启用原生长期记忆，例如 `uv run --locked myagent chat --repo D:\code\My-agent --allow-api --memory`。全局用户偏好跨项目共享，项目事实、决策和经验按仓库隔离；默认保存到 `~/.patchpilot/memory.sqlite3`，可用 `--memory-db` 修改位置。自动提取复用工作模型并共享本轮预算，`/memory` 查看状态，`/memory remember` 显式记录，`/memory extract` 重试待处理内容。恢复时需要再次开启，未启用时不打开数据库。完整用法见 [原生长期记忆](docs/memory.md)。
 
 ## Harness 项目检查
 
@@ -158,16 +175,16 @@ harness/harness-<编号>/
 ```
 
 ```powershell
-uv run --locked patchpilot chat --resume <会话编号> --allow-api --allow-harness
+uv run --locked myagent chat --resume <会话编号> --allow-api --allow-harness
 # 从其他启动目录恢复时指定记录目录：
-uv run --locked patchpilot chat --resume <会话编号> --sessions-dir D:\code\My-agent\.patchpilot-sessions --allow-api
+uv run --project D:\code\My-agent --locked myagent chat --resume <会话编号> --sessions-dir D:\code\My-agent\.patchpilot-sessions --allow-api
 ```
 
 可提供 `--repo` 核对原仓库路径。同一会话禁止并发打开，状态采用临时文件替换。恢复后目标暂停、文件读取授权清空、未完成工具补记中断结果，旧命令和 Harness 检查都不会重放。命令和 Harness 权限需要本次启动重新授予。
 
 ## 预算与验证
 
-每次用户提交默认最多 24 次模型请求、64 次工具调用、600 秒、100000 个已知 token、120000 字符上下文、8 次目标续跑。工作模型和评估模型共用预算、分别统计；Harness 受本轮剩余时限约束。token 阈值不是费用硬上限，失败请求也可能已计费。
+每次用户提交默认最多 24 次模型请求、64 次工具调用、600 秒、100000 个已知 token、120000 字符上下文、8 次目标续跑。工作模型、摘要请求和评估模型共用预算、分别统计；Harness 受本轮剩余时限约束。token 阈值不是费用硬上限，失败请求也可能已计费。
 
 可使用 `--max-model-calls`、`--max-tool-calls`、`--timeout`、`--max-tokens`、`--max-output-tokens`、`--max-context-chars`、`--max-continuations` 调整。
 

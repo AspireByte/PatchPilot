@@ -1,4 +1,4 @@
-"""上下文构建边界；当前实现保留完整历史并只做容量检查。"""
+"""上下文视图、只读容量检查与请求前压缩边界。"""
 
 from __future__ import annotations
 
@@ -33,9 +33,12 @@ class NoopCompactor:
     ) -> Sequence[Mapping[str, Any]]:
         return messages
 
+    def view(self, messages):
+        return messages
+
 
 class ContextBuilder:
-    """构建模型请求上下文，为未来压缩保留稳定入口。"""
+    """构建模型请求上下文，统一扣除固定开销并按需压缩历史。"""
 
     def __init__(
         self,
@@ -60,7 +63,7 @@ class ContextBuilder:
         *,
         messages: Sequence[Mapping[str, Any]] | None = None,
     ) -> bool:
-        history = self._view(messages)
+        history = self.view(messages=messages)
         size = len(system)
         size += len(json.dumps(history, ensure_ascii=False))
         size += len(json.dumps(tools, ensure_ascii=False))
@@ -73,14 +76,30 @@ class ContextBuilder:
         *,
         messages: Sequence[Mapping[str, Any]] | None = None,
     ) -> tuple[str, list[Mapping[str, Any]], list[Mapping[str, Any]]]:
-        history = list(self._view(messages))
+        raw = self.messages if messages is None else messages
         tool_defs = list(tools)
-        if not self.fits(system, tool_defs, messages=history):
-            raise ContextLimitReached("上下文达到上限，请保存并使用 /new 开启新会话")
+        extra = [message for source in self.sources for message in source.messages()]
+        overhead = len(system) + len(json.dumps(tool_defs, ensure_ascii=False))
+        if extra:
+            overhead += len(json.dumps(extra, ensure_ascii=False))
+        available = self.max_chars - overhead
+        if available <= 0:
+            raise ContextLimitReached("固定提示和工具定义已超过上下文预算，请调整预算或使用 /new")
+        history = list(self.compactor.compact(raw, max_chars=available)) + extra
+        if (
+            len(system)
+            + len(json.dumps(history, ensure_ascii=False))
+            + len(json.dumps(tool_defs, ensure_ascii=False))
+            > self.max_chars
+        ):
+            raise ContextLimitReached("上下文达到上限，最近消息无法压缩；可使用 /compact 或 /new")
         return system, history, tool_defs
 
-    def _view(self, messages: Sequence[Mapping[str, Any]] | None) -> Sequence[Mapping[str, Any]]:
+    def view(self, *, messages: Sequence[Mapping[str, Any]] | None = None) -> list:
+        """只生成已有摘要视图，不调用模型，也不触发压缩。"""
         history = list(self.messages if messages is None else messages)
+        view = getattr(self.compactor, "view", None)
+        history = list(view(history)) if view else history
         for source in self.sources:
             history.extend(source.messages())
-        return self.compactor.compact(history, max_chars=self.max_chars)
+        return history

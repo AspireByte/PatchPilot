@@ -1,4 +1,4 @@
-"""PatchPilot 的唯一用户命令入口。"""
+"""myagent 的用户命令入口，兼容旧 patchpilot 命令。"""
 
 import argparse
 import math
@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     # console script 和 python -m patchpilot 都进入这里，再由 run_chat 创建会话。
     # argv=None 时 argparse 读取终端参数；返回整数供入口作为进程退出码。
     parser = argparse.ArgumentParser(
-        prog="patchpilot",
+        prog="myagent",
         description="本地仓库持续对话与按需 Harness 检查。",
         add_help=False,
     )

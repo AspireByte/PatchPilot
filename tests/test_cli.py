@@ -24,7 +24,7 @@ def run_cli(arguments: list[str], cwd: Path) -> subprocess.CompletedProcess[str]
 def test_help_works_outside_project_directory(tmp_path: Path) -> None:
     result = run_cli(["--help"], tmp_path)
     assert result.returncode == 0, result.stderr
-    assert "patchpilot" in result.stdout
+    assert "myagent" in result.stdout
     assert "--help" in result.stdout
     assert result.stderr == ""
 

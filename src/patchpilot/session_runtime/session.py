@@ -3,20 +3,27 @@
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from functools import wraps
 from pathlib import Path
+from threading import RLock
 from time import monotonic
 from typing import Protocol
 
 from patchpilot.core import AgentLoop, LoopStopped, RuntimeEvent
 from patchpilot.core.budget import AgentBudget
-from patchpilot.core.context import ContextBuilder
+from patchpilot.core.compression import HistoryCompactor
+from patchpilot.core.context import ContextBuilder, ContextLimitReached
 from patchpilot.core.control import ExecutionControl, ExecutionStopped
+from patchpilot.core.memory import MemoryBackend, MemoryOptions
+from patchpilot.core.types import ModelRequest
 from patchpilot.infrastructure.persistence.session_store import SessionStore
 from patchpilot.infrastructure.verification import service as harness_module
 from patchpilot.infrastructure.verification.runner import VerificationRunner
 from patchpilot.infrastructure.verification.service import HarnessConfig
 from patchpilot.model.protocol import ModelClientAdapter, ModelFailure
+from patchpilot.session_runtime.compression import summarize_history
 from patchpilot.session_runtime.goal import EVALUATOR_PROMPT, GoalController
+from patchpilot.session_runtime.memory import MemoryCoordinator, MemoryToolProvider
 from patchpilot.session_runtime.prompts import AGENT_CORE_PROMPT, CHAT_POLICY_PROMPT, compose_prompt
 from patchpilot.tools_runtime import ToolExecutor
 from patchpilot.tools_runtime.builtin import BuiltinToolSet
@@ -35,6 +42,8 @@ class SessionModel(Protocol):
 HELP = """普通输入：持续对话；
     /help：帮助；
     /status：状态；
+    /compact：压缩旧历史，保留原文；
+    /memory：长期记忆状态与管理（需 --memory）；
     /diff：文件差异
     /goal <条件>：设置并执行目标；
     /goal：查看目标；
@@ -67,6 +76,21 @@ def _text(response) -> str:
     return "\n".join(block.text for block in response.content if block.type == "text")
 
 
+def _exclusive(method):
+    @wraps(method)
+    def invoke(self, *args, **kwargs):
+        if not self._operation_lock.acquire(blocking=False):
+            raise TurnStopped("会话正在执行，请等待当前操作结束")
+        try:
+            if self._closed:
+                raise TurnStopped("会话已关闭")
+            return method(self, *args, **kwargs)
+        finally:
+            self._operation_lock.release()
+
+    return invoke
+
+
 class AgentSession:
     """持续对话的协调对象，连接模型、上下文、本地工具、目标与会话存储。
 
@@ -94,6 +118,9 @@ class AgentSession:
         budget: AgentBudget | None = None,
         max_continuations: int = 8,
         on_event: Callable[[dict], None] | None = None,
+        memory_backend: MemoryBackend | None = None,
+        memory_options: MemoryOptions | None = None,
+        memory_error: str = "",
     ):
         """建立新会话，或从指定存储恢复历史并重新绑定本次启动的权限。
 
@@ -105,8 +132,12 @@ class AgentSession:
         """
         self.store = store or SessionStore(sessions_root, session_id)
         self._closed = False
+        self._operation_lock = RLock()
+        self._active_loop = None
         self.model = model
         self.evaluator_model = evaluator_model or model
+        self.memory = None
+        self.memory_error = memory_error
         self.budget = budget or AgentBudget(
             max_model_calls=24,
             max_tool_calls=64,
@@ -118,13 +149,20 @@ class AgentSession:
             self.store.close()
             raise ValueError("自动续跑上限必须为正整数")
         self.messages = []
-        self.context = ContextBuilder(self.messages, self.budget.max_context_chars)
+        self.compactor = HistoryCompactor(self._summarize, on_event=self._compression_event)
+        self.context = ContextBuilder(
+            self.messages,
+            self.budget.max_context_chars,
+            compactor=self.compactor,
+        )
         self.goal = GoalController()
         self.saved_harness = {}
         self.baselines = {}
         self.stats = {
             "worker": {"calls": 0, "tokens": 0, "unknown_usage": 0},
             "evaluator": {"calls": 0, "tokens": 0, "unknown_usage": 0},
+            "compactor": {"calls": 0, "tokens": 0, "unknown_usage": 0},
+            "memory": {"calls": 0, "tokens": 0, "unknown_usage": 0},
             "tool_calls": 0,
         }
         try:
@@ -169,6 +207,18 @@ class AgentSession:
                 on_harness_event=lambda kind, values: self.event(kind, **values),
             )
             self._repair_pending()
+            if restoring:
+                self.compactor.restore(state.get("compression") or {}, self.messages)
+            self.tool_provider = self.tools
+            if memory_backend is not None:
+                try:
+                    self.memory = MemoryCoordinator(
+                        memory_backend, self.tools.repo, self.session_id,
+                        self.messages, memory_options,
+                    )
+                    self.tool_provider = MemoryToolProvider(self.tools, self.memory)
+                except Exception as error:
+                    self.memory_error = str(error)[:1000]
             self.save()
             self.event("session_restored" if restoring else "session_created")
         except (KeyError, TypeError, AttributeError) as error:
@@ -206,6 +256,7 @@ class AgentSession:
                 "version": 1,
                 "repo": str(self.tools.repo),
                 "messages": self.messages,
+                "compression": self.compactor.state(),
                 "goal": asdict(self.goal),
                 "stats": self.stats,
                 "baselines": self.baselines,
@@ -299,6 +350,12 @@ class AgentSession:
                 "仓库": str(self.tools.repo),
                 "目标": asdict(self.goal),
                 "累计用量": self.stats,
+                "长期记忆": self._memory_status(),
+                "上下文压缩": {
+                    "原始消息数": len(self.messages),
+                    "视图消息数": len(self.context.view()),
+                    "摘要块数": len(self.compactor.blocks),
+                },
                 "自动执行命令": self.tools.allow_commands,
                 "Harness检查": self.tools.harness is not None,
             },
@@ -306,6 +363,7 @@ class AgentSession:
             indent=2,
         )
 
+    @_exclusive
     def submit(self, text: str) -> SessionResult:
         """处理一次终端输入，直到回答完成、目标停止或执行被暂停。
 
@@ -324,9 +382,32 @@ class AgentSession:
             return SessionResult(HELP, "status")
         if text in ("/status", "/goal"):
             return SessionResult(self.status(), "status")
+        if text == "/memory" or text.startswith("/memory "):
+            try:
+                arguments = text[len("/memory"):].strip()
+                if not arguments:
+                    value = self._memory_status()
+                elif arguments == "extract":
+                    value = self.extract_memory()
+                elif self.memory is not None:
+                    value = self.memory.command(arguments, self.messages)
+                else:
+                    raise ValueError(self.memory_error or "长期记忆未开启，请使用 --memory")
+                return SessionResult(json.dumps(value, ensure_ascii=False, indent=2), "status")
+            except KeyboardInterrupt:
+                return SessionResult("记忆操作已中断，原始历史已保留", "error")
+            except Exception as error:
+                return SessionResult(str(error)[:1000], "error")
         if text == "/diff":
             result = self.tools.dispatch("get_diff", {})
             return SessionResult(json.dumps(result, ensure_ascii=False, indent=2), "status")
+        if text == "/compact":
+            try:
+                return SessionResult(json.dumps(self.compact(), ensure_ascii=False), "status")
+            except KeyboardInterrupt:
+                return SessionResult("压缩已中断，原始历史已保留", "error")
+            except (ContextLimitReached, TurnStopped, ModelFailure, ExecutionStopped) as error:
+                return SessionResult(str(error), "error")
         if text in ("/new", "/exit"):
             return SessionResult("", text[1:])
         if text == "/goal clear":
@@ -365,14 +446,15 @@ class AgentSession:
         try:
             self.context.append({"role": "user", "content": query})
             self.save()
+            self._recall_memory(query)
             self.event("turn_started")
             while True:
                 loop = AgentLoop(
                     ModelClientAdapter(self.model),
-                    ToolExecutor(self.tools, control=self.control),
+                    ToolExecutor(self.tool_provider, control=self.control),
                     self.budget,
                     control=self.control,
-                    context=ContextBuilder(self.messages, self.budget.max_context_chars),
+                    context=self.context,
                     events=self._handle_loop_event,
                     checkpoint=self.save,
                     initial_model_calls=self.turn_calls,
@@ -382,16 +464,20 @@ class AgentSession:
                     repeated=self.repeated,
                     clock=monotonic,
                 )
-                loop_result = loop.run(self.messages, SYSTEM_PROMPT)
+                self._active_loop = loop
+                try:
+                    loop_result = loop.run(self.messages, SYSTEM_PROMPT)
+                finally:
+                    self._active_loop = None
                 self.turn_calls = loop_result.model_calls
                 self.turn_tools = loop_result.tool_calls
                 self.turn_tokens = loop_result.tokens
                 last_text = loop_result.last_text
                 if not self.goal.active:
-                    return SessionResult(last_text, "answered")
+                    return self._finish_answer(SessionResult(last_text, "answered"))
                 self._check_budget()
                 if not self.goal.active:
-                    return SessionResult(last_text, "answered")
+                    return self._finish_answer(SessionResult(last_text, "answered"))
                 # 只有目标激活且工作模型结束本轮时才评估；tools=[] 限制评估器只能判断现有证据。
                 # 这是模型对本地证据的判断，可信度仍受检查覆盖和模型判断能力限制。
                 evaluation = self._call(
@@ -404,7 +490,7 @@ class AgentSession:
                             "content": json.dumps(
                                 {
                                     "completion_condition": self.goal.condition,
-                                    "conversation": self.messages,
+                                    "conversation": self._evaluation_view(),
                                 },
                                 ensure_ascii=False,
                             ),
@@ -427,7 +513,9 @@ class AgentSession:
                 self.save()
                 self.event("goal_evaluated", **asdict(self.goal))
                 if achieved or not self.goal.active:
-                    return SessionResult(last_text, self.goal.status, self.goal.reason)
+                    return self._finish_answer(
+                        SessionResult(last_text, self.goal.status, self.goal.reason)
+                    )
                 if self.continuations >= self.max_continuations:
                     raise TurnStopped("自动续跑已达上限；目标保留，请显式继续")
                 self.continuations += 1
@@ -447,6 +535,7 @@ class AgentSession:
             ModelFailure,
             TurnStopped,
             LoopStopped,
+            ContextLimitReached,
         ) as error:
             # 暂停保留已经发生的文件修改；清空读取授权，防止下一轮沿用中断前的文件版本。
             self.control.stop("cancelled")
@@ -528,7 +617,7 @@ class AgentSession:
     def _call(self, model, kind: str, system: str, messages: list, tools: list):
         """执行一次模型请求，返回 SDK 消息对象，并更新用量与事件记录。
 
-        kind 区分 worker/evaluator 以分别统计，二者共享本次提交的调用和 token 预算。
+        kind 区分工作、评估、压缩和记忆请求；它们共享本次提交的调用和 token 预算。
         system、messages、tools 是实际发送的提示、历史与工具定义，评估调用传空工具列表。
         请求前先记未知用量，收到有效 usage 后再转为已知；请求失败时保留未知计数。
         本方法不执行响应中的工具，协议检查和工具分发由 submit 负责。
@@ -537,7 +626,9 @@ class AgentSession:
         self._check_budget()
         if self.turn_calls >= self.budget.max_model_calls:
             raise TurnStopped("本轮模型调用预算已耗尽（包含目标评估）")
-        if not self.context.fits(system, tools, messages=messages):
+        if not ContextBuilder([], self.budget.max_context_chars).fits(
+            system, tools, messages=messages
+        ):
             raise TurnStopped("上下文达到上限，请保存并使用 /new 开启新会话")
         self.turn_calls += 1
         self.stats[kind]["calls"] += 1
@@ -575,3 +666,175 @@ class AgentSession:
         self.save()
         self.event("model_finished", kind=kind)
         return response
+
+    def _compression_event(self, kind: str, **values) -> None:
+        self.event(kind, **values)
+        if kind == "context_compacted":
+            self.save()
+
+    def _memory_status(self) -> dict:
+        if self.memory is None:
+            return {"enabled": False, "last_error": self.memory_error}
+        try:
+            return {**self.memory.status(self.messages), "usage": self.stats["memory"]}
+        except Exception as error:
+            return {"enabled": True, "database": self.memory.backend.location,
+                    "last_error": str(error)[:1000], "usage": self.stats["memory"]}
+
+    def _memory_failed(self, error) -> None:
+        self.memory_error = str(error)[:1000] or "记忆操作被中断"
+        if self.memory is not None:
+            self.memory.last_error = self.memory_error
+        self.event("memory_failed", reason=self.memory_error)
+
+    def _recall_memory(self, query: str) -> None:
+        if self.memory is None:
+            return
+        try:
+            snapshot = self.memory.recall(query, self.budget.max_context_chars)
+            # 当前轮与最近消息不可压缩，优先为它们保留空间。
+            boundaries = [
+                n for n in self.compactor._boundaries(self.messages)
+                if n <= len(self.messages) - self.compactor.preserve_recent
+            ]
+            protected = len(json.dumps(
+                self.messages[boundaries[-1] if boundaries else 0:], ensure_ascii=False
+            ))
+            fixed = len(SYSTEM_PROMPT) + len(json.dumps(
+                self.tool_provider.definitions(), ensure_ascii=False
+            ))
+            room = max(0, self.budget.max_context_chars - fixed - protected - 64)
+            snapshot = snapshot.limited(room)
+            self.memory.snapshot = snapshot
+            self.context.sources = (snapshot,)
+            self.memory_error = ""
+            self.event("memory_recalled", chars=len(snapshot.content))
+        except Exception as error:
+            self.context.sources = ()
+            self._memory_failed(error)
+
+    def _extract_memory_batch(self) -> dict:
+        if self.memory is None:
+            raise ValueError(self.memory_error or "长期记忆未开启，请使用 --memory")
+        result = self.memory.extract(
+            self.messages, max_chars=self.budget.max_context_chars,
+            complete=lambda system, messages: self._call(
+                self.model, "memory", system, messages, []
+            ),
+            check=self._check_budget,
+        )
+        self.memory_error = ""
+        self.event("memory_extracted", **result)
+        return result
+
+    def _finish_answer(self, result: SessionResult) -> SessionResult:
+        self.save()
+        if self.memory is not None:
+            try:
+                self._extract_memory_batch()
+            except (KeyboardInterrupt, ExecutionStopped) as error:
+                self.control.stop("cancelled")
+                self._memory_failed(error)
+            except Exception as error:
+                self._memory_failed(error)
+        return result
+
+    @_exclusive
+    def extract_memory(self) -> dict:
+        """手动处理一批待提取原文；使用独立的本次操作预算。"""
+        self.control = ExecutionControl()
+        self.started = monotonic()
+        self.turn_calls = self.turn_tools = self.turn_tokens = 0
+        try:
+            return self._extract_memory_batch()
+        except (Exception, KeyboardInterrupt) as error:
+            self._memory_failed(error)
+            raise
+        finally:
+            self.save()
+
+    def _summarize(self, source: str, limit: int) -> str:
+        def complete(system, messages):
+            if self._active_loop is not None:
+                return self._active_loop.complete_auxiliary(
+                    ModelRequest(
+                        system=system,
+                        messages=messages,
+                        tools=[],
+                        timeout_seconds=self._remaining(),
+                        max_output_tokens=self.budget.max_output_tokens,
+                    )
+                )
+            return self._call(self.model, "compactor", system, messages, [])
+
+        return summarize_history(
+            source,
+            limit,
+            max_chars=self.budget.max_context_chars,
+            complete=complete,
+        )
+
+    def _evaluation_view(self) -> list:
+        # conversation 被放进 JSON 字符串后还会再次转义；预留该实际包装开销。
+        def payload(history):
+            return [
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "completion_condition": self.goal.condition,
+                            "conversation": history,
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ]
+
+        history = self.context.view()
+        extra = [message for source in self.context.sources for message in source.messages()]
+        overhead = len(EVALUATOR_PROMPT) + len(json.dumps(payload([]), ensure_ascii=False))
+        escape_overhead = len(json.dumps(payload(history), ensure_ascii=False)) - len(
+            json.dumps(history, ensure_ascii=False)
+        )
+        available = (
+            self.budget.max_context_chars
+            - max(overhead, escape_overhead + len(EVALUATOR_PROMPT))
+            - 64
+            - (len(json.dumps(extra, ensure_ascii=False)) if extra else 0)
+        )
+        history = list(self.compactor.compact(self.messages, max_chars=max(0, available))) + extra
+        if (
+            len(EVALUATOR_PROMPT) + len(json.dumps(payload(history), ensure_ascii=False)) + 2
+            > self.budget.max_context_chars
+        ):
+            raise ContextLimitReached("评估请求包装后仍超过上下文预算")
+        return history
+
+    @_exclusive
+    def compact(self) -> dict:
+        """独立手动操作，复用主模型；与 submit 互斥且不写入聊天指令。"""
+        self.control = ExecutionControl()
+        self.started = monotonic()
+        self.turn_calls = self.turn_tools = self.turn_tokens = 0
+        before = len(json.dumps(self.context.view(), ensure_ascii=False))
+        available = (
+            self.budget.max_context_chars
+            - len(SYSTEM_PROMPT)
+            - len(json.dumps(self.tool_provider.definitions(), ensure_ascii=False))
+            - sum(len(json.dumps(source.messages(), ensure_ascii=False))
+                  for source in self.context.sources)
+        )
+        try:
+            history = self.compactor.compact(self.messages, max_chars=max(0, available), force=True)
+            history = list(history) + [
+                message for source in self.context.sources for message in source.messages()
+            ]
+            after = len(json.dumps(history, ensure_ascii=False))
+            return {
+                "before_chars": before,
+                "after_chars": after,
+                "saved_chars": before - after,
+                "blocks": len(self.compactor.active_blocks),
+            }
+        finally:
+            self.save()

@@ -2,7 +2,7 @@
 
 ## 1. 启动阶段
 
-`patchpilot chat` 首先确定仓库路径、会话目录、模型和权限。`--allow-api`、`--allow-commands`、`--allow-harness` 分别控制三类能力；未授权的工具不会出现在发送给模型的工具列表中。
+`myagent chat` 首先确定仓库路径、会话目录、模型和权限。`--allow-api`、`--allow-commands`、`--allow-harness` 分别控制三类能力；未授权的工具不会出现在发送给模型的工具列表中。
 
 新会话会创建 `session_runtime.AgentSession`、`tools_runtime.builtin.LocalTools`、`core.context.ContextBuilder` 和 `infrastructure.persistence.SessionStore`。恢复会话时核对原仓库路径，并重新读取启动时的 Harness 配置；命令和 Harness 权限必须由本次启动再次提供。
 

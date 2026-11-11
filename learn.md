@@ -1,11 +1,11 @@
-# PatchPilot 快速学习指南
+# myagent 快速学习指南
 
-这份文档帮助你在较短时间内理解 PatchPilot 当前的产品边界、调用链和源码组织。
+这份文档帮助你在较短时间内理解 myagent 当前的产品边界、调用链和源码组织。
 内容以当前代码为准；固定任务、服务和评测属于内部回归链路，不是聊天产品的主入口。
 
 ## 1. 项目是什么
 
-PatchPilot 是一个面向本地代码仓库的持续对话 Agent：
+myagent 是一个面向本地代码仓库的持续对话 Agent：
 
 - 模型负责理解用户目标、决定下一步并提出工具调用；
 - Runtime 负责预算、取消、协议检查、权限和工具结果配对；
@@ -26,13 +26,13 @@ uv sync --locked
 查看公开命令：
 
 ```powershell
-uv run --locked patchpilot --help
+uv run --locked myagent --help
 ```
 
 启动聊天：
 
 ```powershell
-uv run --locked patchpilot chat `
+uv run --locked myagent chat `
   --repo D:\code\My-agent `
   --allow-api
 ```
@@ -45,7 +45,7 @@ uv run --locked patchpilot chat `
 - `--resume <id>`：恢复已有会话，但权限需要本次启动重新提供；
 - `--sessions-dir <path>`：指定会话目录。
 
-只读了解项目时可以先不开放命令和 Harness。公开入口只有 `patchpilot chat`；服务和评测仍可通过以下模块启动：
+只读了解项目时可以先不开放命令和 Harness。公开入口只有 `myagent chat`；服务和评测仍可通过以下模块启动：
 
 ```powershell
 python -m patchpilot.service.cli --help
@@ -55,7 +55,7 @@ python -m patchpilot.evaluation.cli --help
 ## 3. 一次请求的主链路
 
 ```text
-patchpilot chat
+myagent chat
   -> interfaces.cli.main.main
   -> interfaces.cli.chat.run_chat
   -> session_runtime.session.AgentSession.submit
@@ -249,7 +249,7 @@ Docker、PostgreSQL 和真实 Anthropic 测试需要单独的环境和权限，�
 
 ## 9. 面试式总结
 
-> PatchPilot 是一个面向本地仓库的持续对话 Agent。模型通过 Provider 无关的 Runtime 请求工具，工具运行时负责权限、schema、路径和文件摘要保护；Session 保存完整消息、目标和恢复状态；Harness 在临时副本中执行冻结 profile，并返回带快照摘要、退出码和运行时信息的结构化证据。固定任务和服务代码被隔离在 legacy 与独立基础设施边界中，避免污染通用 Agent Runtime。
+> myagent 是一个面向本地仓库的持续对话 Agent。模型通过 Provider 无关的 Runtime 请求工具，工具运行时负责权限、schema、路径和文件摘要保护；Session 保存完整消息、目标和恢复状态；Harness 在临时副本中执行冻结 profile，并返回带快照摘要、退出码和运行时信息的结构化证据。固定任务和服务代码被隔离在 legacy 与独立基础设施边界中，避免污染通用 Agent Runtime。
 
 回答实现细节时，优先说明：
 

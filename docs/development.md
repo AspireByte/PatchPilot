@@ -14,14 +14,14 @@ uv run --locked ruff format --check .
 ## 2. 启动聊天
 
 ```powershell
-uv run --locked patchpilot chat `
+uv run --locked myagent chat `
   --repo D:\code\My-agent `
   --allow-api `
   --allow-commands `
   --allow-harness
 ```
 
-只读分析可以省略 `--allow-commands` 和 `--allow-harness`。恢复时使用 `--resume <会话编号>`，并重新提供本次需要的权限。
+只读分析可以省略 `--allow-commands` 和 `--allow-harness`。恢复时使用 `--resume <会话编号>`，并重新提供本次需要的权限。从其他目录运行时，使用 `uv run --project D:\code\My-agent --locked myagent chat ...`；`--repo` 只指定目标仓库，不用于定位程序。
 
 ## 3. 推荐阅读顺序
 

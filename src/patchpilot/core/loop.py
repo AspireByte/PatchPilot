@@ -54,6 +54,8 @@ class AgentLoop:
         self.tools = tools
         self.budget = budget
         self.control = control
+        if hasattr(self.model, "control"):
+            self.model.control = control
         self.context = context
         self.events = events or (lambda _event: None)
         self.checkpoint = checkpoint or (lambda: None)
@@ -98,36 +100,54 @@ class AgentLoop:
                 system, messages, tools = self.context.build(system, tools, messages=messages)
             except ContextLimitReached as error:
                 raise LoopStopped(str(error)) from error
+        return self.complete_auxiliary(
+            ModelRequest(
+                system=system,
+                messages=messages,
+                tools=tools,
+                timeout_seconds=self._remaining(),
+                max_output_tokens=self.budget.max_output_tokens,
+            ),
+            kind=self.kind,
+        )
+
+    def complete_auxiliary(
+        self, request: ModelRequest, *, kind: str = "compactor"
+    ) -> ModelResponse:
+        """摘要等内部请求与工作请求共享次数、token、取消和时间预算。"""
+        self._check_budget()
+        if self.model_calls >= self.budget.max_model_calls:
+            raise LoopStopped("本轮模型调用预算已耗尽（包含上下文压缩）")
         self.model_calls += 1
         self._emit(
             "model_started",
-            kind=self.kind,
+            kind=kind,
             number=self.model_calls,
         )
         self.checkpoint()
         try:
             response = self.model.complete(
                 ModelRequest(
-                    system=system,
-                    messages=messages,
-                    tools=tools,
+                    system=request.system,
+                    messages=request.messages,
+                    tools=request.tools,
                     timeout_seconds=self._remaining(),
                     max_output_tokens=min(
-                        self.budget.max_output_tokens,
+                        request.max_output_tokens,
                         self.budget.max_total_tokens - self.tokens,
                     ),
                 )
             )
         except Exception as error:
             reason = getattr(error, "reason", None) or str(error)
-            self._emit("model_failed", kind=self.kind, number=self.model_calls, reason=reason)
+            self._emit("model_failed", kind=kind, number=self.model_calls, reason=reason)
             raise
         usage = response.usage
         if usage is not None:
             self.tokens += usage.total_tokens
         self._emit(
             "model_finished",
-            kind=self.kind,
+            kind=kind,
             number=self.model_calls,
             usage=(
                 {

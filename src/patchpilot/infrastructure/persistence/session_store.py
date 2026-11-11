@@ -25,6 +25,8 @@ class _Usage(_Record):
 class _Stats(_Record):
     worker: _Usage
     evaluator: _Usage
+    compactor: _Usage = Field(default_factory=lambda: _Usage(calls=0, tokens=0, unknown_usage=0))
+    memory: _Usage = Field(default_factory=lambda: _Usage(calls=0, tokens=0, unknown_usage=0))
     tool_calls: int = Field(ge=0)
 
 
@@ -46,6 +48,20 @@ class _Harness(_Record):
     runtime: Literal["auto", "docker", "host"] | None
 
 
+class _CompressionBlock(_Record):
+    identifier: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=1)
+    summary: str = Field(min_length=1)
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    tier: Literal[1, 2, 3]
+    children: list[str]
+
+
+class _Compression(_Record):
+    blocks: list[_CompressionBlock] = Field(default_factory=list)
+
+
 class _State(_Record):
     # Literal 限定可接受的值，A | None 表示允许空值；这些注解由 Pydantic 在 load 时校验。
     # 普通 Python 注解不会自动做这些检查，这里的运行时校验来自 BaseModel。
@@ -58,6 +74,7 @@ class _State(_Record):
     model: str
     evaluator_model: str
     harness: _Harness | None = None
+    compression: _Compression = Field(default_factory=_Compression)
 
 
 class SessionStore:

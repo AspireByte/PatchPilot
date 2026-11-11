@@ -18,4 +18,8 @@ def test_old_execution_commands_are_rejected(command):
 def test_distribution_exposes_only_chat_cli():
     root = Path(__file__).resolve().parents[1]
     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert data["project"]["scripts"] == {"patchpilot": "patchpilot.interfaces.cli.main:main"}
+    assert data["project"]["name"] == "myagent"
+    assert data["project"]["scripts"] == {
+        "myagent": "patchpilot.interfaces.cli.main:main",
+        "patchpilot": "patchpilot.interfaces.cli.main:main",
+    }

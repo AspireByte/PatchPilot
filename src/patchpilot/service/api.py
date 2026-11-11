@@ -13,11 +13,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from patchpilot.core.context import ContextLimitReached
 from patchpilot.service.artifacts import ArtifactStorage
 from patchpilot.service.catalog import TaskCatalog
 from patchpilot.service.config import ServiceSettings
 from patchpilot.service.maintenance import reap_and_cleanup
 from patchpilot.service.repository import Repository, StateConflict
+from patchpilot.session_runtime.session import AgentSession, TurnStopped
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 
@@ -63,7 +65,12 @@ async def event_stream(repository: Repository, run_id: str, after: int, disconne
         await asyncio.sleep(0.1)
 
 
-def create_app(settings: ServiceSettings, *, repository: Repository | None = None) -> FastAPI:
+def create_app(
+    settings: ServiceSettings,
+    *,
+    repository: Repository | None = None,
+    session: AgentSession | None = None,
+) -> FastAPI:
     owned = repository is None
     store = repository or Repository(settings.database_url)
     catalog = TaskCatalog(settings.tasks_root)
@@ -98,11 +105,21 @@ def create_app(settings: ServiceSettings, *, repository: Repository | None = Non
             )
 
     app = FastAPI(
-        title="PatchPilot 任务服务", lifespan=lifespan, dependencies=[Depends(authenticate)]
+        title="myagent 任务服务", lifespan=lifespan, dependencies=[Depends(authenticate)]
     )
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"]
     )
+
+    @app.post("/v1/sessions/{session_id}/compact")
+    def compact_session(session_id: UUID):
+        # 原任务服务运行的是基准任务，不持有交互会话；仅操作宿主明确绑定的实例。
+        if session is None or str(session_id) != session.session_id:
+            raise HTTPException(404, "未绑定此交互会话")
+        try:
+            return session.compact()
+        except (TurnStopped, ContextLimitReached) as error:
+            raise HTTPException(409, str(error)) from error
 
     @app.exception_handler(StateConflict)
     async def conflict(request, error):

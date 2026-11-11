@@ -21,6 +21,7 @@
 
 ## 未来扩展的接入点
 
-- 上下文压缩接入 `core.context.ContextBuilder` 的 `Compactor` 端口，不改变工具协议和会话格式。
+- 上下文压缩通过 `core.compression.HistoryCompactor` 接入 `ContextBuilder`；会话保存完整原文及可选压缩状态，兼容读取旧 version 1。参见 [上下文压缩](context-compression.md)。
+- 长期记忆通过 `core.memory.MemoryBackend` 和只读 `ContextSource` 快照接入；会话层协调提取与工具，独立 SQLite 保存版本和处理水位。参见 [原生长期记忆](memory.md)。
 - 外部客户端协议（例如 MCP）应作为 `VerificationRunner` 或工具层的薄适配器，不把执行策略复制到协议层。
-- 多 Agent、后台任务和长期记忆尚未实现，不能从现有服务代码推断聊天已经具备这些能力。
+- 多 Agent 和后台任务尚未实现，不能从现有服务代码推断聊天已经具备这些能力。

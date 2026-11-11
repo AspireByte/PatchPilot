@@ -1,5 +1,5 @@
 [project]
-name = "patchpilot"
+name = "myagent"
 version = "0.1.0"
 description = "本地仓库持续对话与按需代码验证 Agent"
 readme = "README.md"
@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
+myagent = "patchpilot.interfaces.cli.main:main"
 patchpilot = "patchpilot.interfaces.cli.main:main"
 
 [build-system]
