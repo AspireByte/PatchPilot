@@ -5,6 +5,7 @@ Checks inline Markdown file links and the backlinks in optional topic pages.
 Semantic accuracy, anchors, question relevance, and writing quality require
 content review.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,7 +36,9 @@ def without_fences(markdown: str) -> str:
 
 
 def section(markdown: str, title: str) -> str:
-    match = re.search(r"^## " + re.escape(title) + r"[^\n]*\n(.*?)(?=^## |\Z)", markdown, re.M | re.S)
+    match = re.search(
+        r"^## " + re.escape(title) + r"[^\n]*\n(.*?)(?=^## |\Z)", markdown, re.M | re.S
+    )
     return match[1] if match else ""
 
 
@@ -47,7 +50,11 @@ def check_resume_bullets(markdown: str) -> list[str]:
     bullets = [line for line in body.splitlines() if line.startswith("- ")]
     if not bullets:
         return ["no top-level resume bullets found"]
-    return [f"use '- **具体支柱名：** 正文': {line}" for line in bullets if not TITLE_PATTERN.match(line)]
+    return [
+        f"use '- **具体支柱名：** 正文': {line}"
+        for line in bullets
+        if not TITLE_PATTERN.match(line)
+    ]
 
 
 def file_target(href: str) -> Path | None:
@@ -77,7 +84,9 @@ def table_rows(markdown: str, prefix: str) -> list[list[str]]:
 
 
 def field(body: str, name: str) -> str:
-    match = re.search(r"^(?:-\s*)?(?:\*\*)?" + re.escape(name) + r"(?:\*\*)?\s*[:：]\s*(.+)$", body, re.M)
+    match = re.search(
+        r"^(?:-\s*)?(?:\*\*)?" + re.escape(name) + r"(?:\*\*)?\s*[:：]\s*(.+)$", body, re.M
+    )
     return match[1].strip() if match else ""
 
 
@@ -107,8 +116,11 @@ def check_topic_page(page: Path, guide: Path, course: Path) -> list[str]:
     parser = TopicFileLinks(page)
     parser.feed(html)
     parser.close()
-    errors = [f"broken local file link in {page.name}: {dest}"
-              for dest in sorted(parser.links) if not dest.is_file()]
+    errors = [
+        f"broken local file link in {page.name}: {dest}"
+        for dest in sorted(parser.links)
+        if not dest.is_file()
+    ]
     for dest in (guide, course):
         if dest not in parser.links:
             errors.append(f"{page.name}: missing relative backlink to {dest.name}")
@@ -116,33 +128,47 @@ def check_topic_page(page: Path, guide: Path, course: Path) -> list[str]:
 
 
 def check_topics(
-    guide: Path, courses: dict[str, Path], route_cells: dict[str, str], docs: dict[Path, str],
+    guide: Path,
+    courses: dict[str, Path],
+    route_cells: dict[str, str],
+    docs: dict[Path, str],
 ) -> list[str]:
     errors = []
     directories = {(course.parent / "topics").resolve() for course in courses.values()}
     pages = {
-        page for folder in directories for page in folder.glob("C*-*.html")
+        page
+        for folder in directories
+        for page in folder.glob("C*-*.html")
         if TOPIC_FILENAME.fullmatch(page.name)
     }
     linked: dict[tuple[str, str], set[Path]] = {}
     for cid, course in courses.items():
         topic_dir = (course.parent / "topics").resolve()
         for place, owner, body in (
-            ("guide route", guide, route_cells[cid]), ("course", course, docs[course]),
+            ("guide route", guide, route_cells[cid]),
+            ("course", course, docs[course]),
         ):
             relative = set()
             for target in markdown_targets(body):
                 page = (owner.parent / target).resolve()
                 if not TOPIC_FILENAME.fullmatch(page.name):
-                    if place == "guide route" and page.parent in directories and page.suffix == ".html":
+                    if (
+                        place == "guide route"
+                        and page.parent in directories
+                        and page.suffix == ".html"
+                    ):
                         errors.append(f"{cid}: invalid topic filename in guide route: {page.name}")
                     continue
                 # The route cell declares a topic alongside the lesson. In the
                 # full lesson, other HTML files can be ordinary source evidence.
-                if page.parent not in directories and (place == "course" or page.parent.name != "topics"):
+                if page.parent not in directories and (
+                    place == "course" or page.parent.name != "topics"
+                ):
                     continue
                 pages.add(page)
-                if place == "guide route" and (page.parent != topic_dir or not page.name.startswith(cid + "-")):
+                if place == "guide route" and (
+                    page.parent != topic_dir or not page.name.startswith(cid + "-")
+                ):
                     errors.append(f"{cid}: {place} links to a topic outside its course: {page}")
                 if target.is_absolute():
                     errors.append(f"{cid}: {place} needs a relative topic link: {page}")
@@ -254,7 +280,9 @@ def check_delivery(interview: Path, guide: Path) -> list[str]:
         errors.append(f"{qid}: mapped question has no body")
     for qid, body in blocks:
         metadata = body.split("**面试官问题**", 1)[0]
-        values = {name: field(metadata, name) for name in ("对应支柱", "触发依据", "考查目标", "学习入口")}
+        values = {
+            name: field(metadata, name) for name in ("对应支柱", "触发依据", "考查目标", "学习入口")
+        }
         for name, value in values.items():
             if not value:
                 errors.append(f"{qid}: missing {name}")

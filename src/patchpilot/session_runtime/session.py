@@ -213,8 +213,11 @@ class AgentSession:
             if memory_backend is not None:
                 try:
                     self.memory = MemoryCoordinator(
-                        memory_backend, self.tools.repo, self.session_id,
-                        self.messages, memory_options,
+                        memory_backend,
+                        self.tools.repo,
+                        self.session_id,
+                        self.messages,
+                        memory_options,
                     )
                     self.tool_provider = MemoryToolProvider(self.tools, self.memory)
                 except Exception as error:
@@ -384,7 +387,7 @@ class AgentSession:
             return SessionResult(self.status(), "status")
         if text == "/memory" or text.startswith("/memory "):
             try:
-                arguments = text[len("/memory"):].strip()
+                arguments = text[len("/memory") :].strip()
                 if not arguments:
                     value = self._memory_status()
                 elif arguments == "extract":
@@ -678,8 +681,12 @@ class AgentSession:
         try:
             return {**self.memory.status(self.messages), "usage": self.stats["memory"]}
         except Exception as error:
-            return {"enabled": True, "database": self.memory.backend.location,
-                    "last_error": str(error)[:1000], "usage": self.stats["memory"]}
+            return {
+                "enabled": True,
+                "database": self.memory.backend.location,
+                "last_error": str(error)[:1000],
+                "usage": self.stats["memory"],
+            }
 
     def _memory_failed(self, error) -> None:
         self.memory_error = str(error)[:1000] or "记忆操作被中断"
@@ -694,15 +701,16 @@ class AgentSession:
             snapshot = self.memory.recall(query, self.budget.max_context_chars)
             # 当前轮与最近消息不可压缩，优先为它们保留空间。
             boundaries = [
-                n for n in self.compactor._boundaries(self.messages)
+                n
+                for n in self.compactor._boundaries(self.messages)
                 if n <= len(self.messages) - self.compactor.preserve_recent
             ]
-            protected = len(json.dumps(
-                self.messages[boundaries[-1] if boundaries else 0:], ensure_ascii=False
-            ))
-            fixed = len(SYSTEM_PROMPT) + len(json.dumps(
-                self.tool_provider.definitions(), ensure_ascii=False
-            ))
+            protected = len(
+                json.dumps(self.messages[boundaries[-1] if boundaries else 0 :], ensure_ascii=False)
+            )
+            fixed = len(SYSTEM_PROMPT) + len(
+                json.dumps(self.tool_provider.definitions(), ensure_ascii=False)
+            )
             room = max(0, self.budget.max_context_chars - fixed - protected - 64)
             snapshot = snapshot.limited(room)
             self.memory.snapshot = snapshot
@@ -717,7 +725,8 @@ class AgentSession:
         if self.memory is None:
             raise ValueError(self.memory_error or "长期记忆未开启，请使用 --memory")
         result = self.memory.extract(
-            self.messages, max_chars=self.budget.max_context_chars,
+            self.messages,
+            max_chars=self.budget.max_context_chars,
             complete=lambda system, messages: self._call(
                 self.model, "memory", system, messages, []
             ),
@@ -821,8 +830,10 @@ class AgentSession:
             self.budget.max_context_chars
             - len(SYSTEM_PROMPT)
             - len(json.dumps(self.tool_provider.definitions(), ensure_ascii=False))
-            - sum(len(json.dumps(source.messages(), ensure_ascii=False))
-                  for source in self.context.sources)
+            - sum(
+                len(json.dumps(source.messages(), ensure_ascii=False))
+                for source in self.context.sources
+            )
         )
         try:
             history = self.compactor.compact(self.messages, max_chars=max(0, available), force=True)

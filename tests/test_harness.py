@@ -73,6 +73,35 @@ def test_docker_mode_reports_infrastructure_error_when_unavailable(
     assert result["isolated"] is False
 
 
+def test_docker_preflight_uses_the_harness_deadline(tmp_path, monkeypatch):
+    write_config(
+        tmp_path,
+        'runtime="docker"\nimage="configured"\ntimeout_seconds=30\n'
+        '[profiles.test]\nargv=["python", "-V"]',
+    )
+    image_id = "sha256:" + "a" * 64
+
+    def docker_command(command, **options):
+        if command[1] == "rm":
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+        assert 0 < options["timeout"] <= 10
+        output = "linux" if command[1] == "info" else image_id
+        return subprocess.CompletedProcess(command, 0, output + "\n", "")
+
+    monkeypatch.setattr("time.monotonic", lambda: 10_000.0)
+    monkeypatch.setattr(
+        "patchpilot.infrastructure.verification.service.subprocess.run", docker_command
+    )
+    monkeypatch.setattr(
+        "patchpilot.infrastructure.verification.service.run_process",
+        lambda *args, **kwargs: ProcessResult(0, False, "docker", False),
+    )
+    result = HarnessService(tmp_path).run()
+
+    assert result["status"] == "passed", result["detail"]
+    assert result["image_id"] == image_id
+
+
 def test_local_tool_exposes_harness_only_when_injected(tmp_path: Path) -> None:
     plain = LocalTools(tmp_path)
     assert "run_harness_check" not in {item["name"] for item in plain.definitions()}
@@ -305,15 +334,19 @@ def test_real_docker_executes_snapshot_with_overridden_entrypoint(tmp_path):
         'runtime="docker"\nimage="patchpilot-tests:py312-v1"\n'
         '[profiles.test]\nargv=["python", "check.py"]',
     )
+    (tmp_path / "source.txt").write_text("original", encoding="utf-8")
     (tmp_path / "check.py").write_text(
         "import os\nfrom pathlib import Path\nassert os.getuid() == 10001\n"
-        "assert not Path('.env').exists()\nPath('created.txt').write_text('snapshot')\n"
+        "assert not Path('.env').exists()\n"
+        "Path('created.txt').write_text('snapshot')\n"
+        "Path('source.txt').write_text('modified snapshot')\n"
         "print('container-checked')\n",
         encoding="utf-8",
     )
     (tmp_path / ".env").write_text("PRIVATE=value", encoding="utf-8")
     result = HarnessService(tmp_path).run()
-    assert result["status"] == "passed", result
+    assert result["status"] == "passed", f"{result['detail']}\n{result['output']}"
     assert result["isolated"] and result["image_id"].startswith("sha256:")
     assert result["cleanup_ok"] and "container-checked" in result["output"]
     assert not (tmp_path / "created.txt").exists()
+    assert (tmp_path / "source.txt").read_text(encoding="utf-8") == "original"

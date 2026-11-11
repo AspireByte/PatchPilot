@@ -25,9 +25,13 @@ def add_chat_parser(commands, add_help, positive_integer, positive_timeout) -> N
         help="会话保存目录，默认相对启动目录",
     )
     parser.add_argument("--allow-api", action="store_true", help="允许发送代码到模型API并产生费用")
-    parser.add_argument("--memory", action="store_true", help="启用原生长期记忆，自动提取共享本轮模型预算")
     parser.add_argument(
-        "--memory-db", type=Path, default=Path.home() / ".patchpilot" / "memory.sqlite3",
+        "--memory", action="store_true", help="启用原生长期记忆，自动提取共享本轮模型预算"
+    )
+    parser.add_argument(
+        "--memory-db",
+        type=Path,
+        default=Path.home() / ".patchpilot" / "memory.sqlite3",
         help="记忆数据库位置；仅在 --memory 开启时使用",
     )
     parser.add_argument(

@@ -70,7 +70,9 @@ def build_prompt(
         lines.append(short_name.strip())
     else:
         lines.append("_（未提供，请从描述提炼并在写入前写明）_")
-    lines.extend(["", "### 项目描述（必须）", "", "```text", _escape_md(description.strip()), "```", ""])
+    lines.extend(
+        ["", "### 项目描述（必须）", "", "```text", _escape_md(description.strip()), "```", ""]
+    )
 
     lines.append("### 技术栈（可选）")
     lines.append("")

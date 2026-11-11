@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C05 · 上下文压缩：何时提交摘要，何时停止</title>
+  <style>
+    :root { color-scheme: light; --ink: #182d2a; --muted: #495e57; --accent: #126657; --rule: #c4cfc5; --paper: #f8f8f1; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.75 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    main { max-width: 52rem; margin: auto; padding: 2.5rem clamp(1rem, 4vw, 2rem) 4rem; }
+    a { color: var(--accent); text-underline-offset: .2em; overflow-wrap: anywhere; }
+    nav { display: flex; gap: .5rem 1.5rem; flex-wrap: wrap; }
+    header { border-bottom: 2px solid var(--ink); padding: 1rem 0; }
+    h1 { margin: .5rem 0; font-size: clamp(1.8rem, 5vw, 2.8rem); line-height: 1.25; }
+    h2, legend { margin: 0 0 .6rem; font-size: 1.18rem; font-weight: 650; }
+    p { margin: .5rem 0; }
+    section, fieldset { margin: 1.6rem 0 0; }
+    fieldset { min-width: 0; padding: 1rem clamp(.9rem, 3vw, 1.5rem); border: 1px solid var(--rule); border-radius: .7rem; background: #fffefa; }
+    legend { padding: 0 .3rem; }
+    .choices { position: relative; margin-top: .8rem; }
+    .choices input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; }
+    .choices label { display: inline-block; margin: 0 .3rem .5rem 0; padding: .4rem .8rem; border: 1px solid var(--rule); border-radius: .4rem; cursor: pointer; }
+    .choices input:checked + label { background: var(--ink); color: white; border-color: var(--ink); }
+    .choices input:focus-visible + label, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    .case { display: none; margin-top: .35rem; padding-top: .6rem; border-top: 1px solid var(--rule); }
+    #case-a:checked ~ .case-a, #case-b:checked ~ .case-b, #case-c:checked ~ .case-c { display: block; }
+    .case h3 { margin: .25rem 0; font-size: 1.05rem; }
+    .path { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
+    #evidence { border-top: 1px solid var(--rule); padding-top: 1rem; color: var(--muted); }
+    #evidence ul { padding-inline-start: 1.3rem; }
+    code { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+    pre { overflow: auto; padding: 1rem; background: #edf1e8; border-radius: .4rem; font-size: .86rem; line-height: 1.6; }
+    .strip { display: flex; gap: .4rem; flex-wrap: wrap; margin: .8rem 0; }
+    .block { padding: .35rem .65rem; border: 1px solid var(--rule); border-radius: .4rem; background: #edf1e8; }
+    .summary { color: #fff; background: var(--accent); border-color: var(--accent); }
+    .protected { background: #fff3d9; border-color: #d5b15e; }
+    .failed { background: #f8e7e1; border-color: #c58b7b; }
+    .note { color: var(--muted); font-size: .92rem; }
+    .verdict { font-weight: 650; border-left: 4px solid var(--accent); padding-left: .8rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: .8rem; }
+    th, td { text-align: left; vertical-align: top; padding: .55rem; border-bottom: 1px solid var(--rule); }
+    @media print { body { background: white; } nav, .choices label, .choices input { display: none; } .case { display: block; } fieldset { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <main>
+    <nav aria-label="课程导航">
+      <a href="../../PatchPilot/导学.md">返回导学</a>
+      <a href="../05-上下文压缩.md">返回课程 · C05 上下文压缩</a>
+    </nav>
+    <header>
+      <p>C05 · 对应 B3 / Q4 · 离线交互专题</p>
+      <h1>摘要何时可以替换历史视图？</h1>
+      <p>改变“是否存在安全的旧轮次边界”和“摘要是否有效”，对照请求视图、原始历史与提交结果。</p>
+    </header>
+    <section id="mechanism">
+      <h2>机制怎么工作</h2>
+      <p>一次模型请求先扣除系统提示、工具定义和附加来源的字符开销，再把剩余历史预算交给 <code>HistoryCompactor</code>。默认达到剩余预算的 80% 时尝试压缩，争取降到 60%；60% 是提前结束压缩的目标，最终必须满足字符硬上限。这里比较的是 JSON 序列化字符数，不能当作精确 token 或费用。</p>
+      <p>压缩从未覆盖的旧历史前缀开始，只在下一条普通用户消息前切分；待配对的工具调用和工具结果不能被切开。默认至少保留最近 6 条消息，并保留当前用户轮。模型只写摘要，内核保存原文范围与摘要对应的 SHA-256；真正发给模型的是“摘要块＋剩余原文”的派生视图。</p>
+      <p>新摘要先进入局部变量 <code>staged</code>。只有全部校验成功且视图不超上限，才赋值给 <code>self.blocks</code>。因此，摘要失败不会覆盖既有摘要状态，也不会删除原文；已经发出的模型请求仍占用调用、时间和已知用量预算。</p>
+    </section>
+    <fieldset id="explore">
+      <legend>切换这次请求遇到的历史状态</legend>
+      <p>统一使用扣除固定开销后的 <strong>10,000 字符</strong>历史预算：8,000 触发，6,000 为目标。以下消息与体积均为教学示意，不是仓库运行测量。</p>
+      <div class="choices">
+        <input id="case-a" type="radio" name="case" aria-controls="result-a" checked><label for="case-a">旧轮次完整，摘要有效</label>
+        <input id="case-b" type="radio" name="case" aria-controls="result-b"><label for="case-b">只有受保护的巨大内容</label>
+        <input id="case-c" type="radio" name="case" aria-controls="result-c"><label for="case-c">摘要途中失败</label>
+        <div class="case case-a" id="result-a">
+          <h3>结果：提交新摘要，发送较小的请求视图</h3>
+          <p class="path">14,000 字符 → 找到安全边界 end=12 → 摘要 m0:m11 → 校验 4,900 字符 → self.blocks = staged</p>
+          <p>假定原文有 m0…m17 共 18 条消息，m12 为下一条普通用户消息，且前 12 条里的工具调用全部得到结果。边界 12 满足 <code>12 ≤ 18 − 6</code>，因此前缀可以摘要，尾部 m12…m17 保留。</p>
+          <div class="strip" aria-label="原始历史不变">
+            <span class="block">磁盘原文：m0…m11</span><span class="block protected">磁盘原文：m12…m17</span>
+          </div>
+          <div class="strip" aria-label="模型使用的压缩视图">
+            <span class="block summary">请求：摘要 b1〔m0:m11〕</span><span class="block protected">请求：m12…m17 原样</span>
+          </div>
+          <p>本例 4,900 已低于目标 6,000，提前退出聚合循环。若最终落在 6,000 与 10,000 之间，且没有更多可压缩内容，也允许提交；不能声称每次都压到 60%。</p>
+          <p class="verdict">原文保留；新块提交；工作模型可以继续请求。</p>
+        </div>
+        <div class="case case-b" id="result-b">
+          <h3>结果：没有新摘要可写，超限后停止请求</h3>
+          <p class="path">14,000 字符 → 没有新安全边界 → before &gt; max_chars → ContextLimitReached</p>
+          <p>巨大内容都在最近 6 条消息、当前用户轮，或尚未配对完的工具往返中。即使内容非常长，压缩器也不能任意截断一条工具结果，或者把调用和结果分到两边。本例没有可压缩的旧前缀，因此不会请求摘要模型。</p>
+          <div class="strip" aria-label="全部内容受保护">
+            <span class="block protected">当前用户请求</span><span class="block protected">tool_use：a、b</span><span class="block protected">tool_result：a；b 尚未完成</span>
+          </div>
+          <p>同样的“无安全边界”，如果总量仍未超过 10,000，会直接返回原视图，并不会仅因达到触发比例而报错。这里停止的原因是硬上限已被突破。</p>
+          <p class="verdict">原文保留；摘要状态不变；不发送超限工作请求。</p>
+        </div>
+        <div class="case case-c" id="result-c">
+          <h3>结果：丢弃本次暂存块，保留上一次已提交的视图</h3>
+          <p class="path">已提交 b1 → staged 中新增 b2 → 后续摘要无效或仍超限 → 抛出异常 → 不执行 self.blocks = staged</p>
+          <p>本例先前已有已提交摘要 b1，本次有新的旧轮次可压缩；模型生成 b2 后，下一块返回空摘要、过长摘要，或最终视图仍超硬上限。所有本次新增块一起放弃，b1 及其引用继续有效。并非失败前的 b2 也会部分提交。</p>
+          <div class="strip" aria-label="失败后的提交状态">
+            <span class="block summary">保留：已提交 b1</span><span class="block failed">放弃：暂存 b2 / b3</span><span class="block">保留：全部原始消息</span>
+          </div>
+          <p>这是一份摘要状态的提交边界，不是模型调用事务。摘要请求可能已经产生费用；用量未知时保留未知计数。失败后不能把旧视图直接当作已满足本次预算继续调用模型，必须由上层处理停止。</p>
+          <p class="verdict">原文保留；既有 blocks 不变；本次请求暂停。</p>
+        </div>
+      </div>
+    </fieldset>
+    <section>
+      <h2>决定分支的代码</h2>
+      <p>以下短片段摘自当前实现，省略中间摘要构建细节：</p>
+      <pre><code>eligible = [
+    n for n in self._boundaries(messages)
+    if n &lt;= len(messages) - self.preserve_recent
+]
+staged = list(self.blocks)
+# 摘要生成、长度/缩小效果校验、合并以及最终上限检查
+self.blocks = staged</code></pre>
+      <p><code>_boundaries</code> 维护待配对工具 ID 集合，只有下一条普通用户消息到来且集合为空，才产出轮次边界。<code>view</code> 校验原文指纹后生成深拷贝；<code>restore</code> 还校验连续范围、合并子块与边界，拒绝原文被篡改后沿用旧摘要。</p>
+      <table>
+        <thead><tr><th>容易混淆</th><th>当前实现的边界</th></tr></thead>
+        <tbody>
+          <tr><td>达到 80% 就一定变短</td><td>只有存在新的安全旧轮次，才会生成新摘要；最近内容不能靠删消息强压。</td></tr>
+          <tr><td>保护最近 6 轮</td><td>参数单位是消息条数。完整轮次边界与最近窗口共同限制，实际保留可能多于 6 条。</td></tr>
+          <tr><td>四块后原文被二次覆盖</td><td>活跃块达到 4 个时尝试合并摘要，原文仍保留；层级最多记为 3，不代表只允许压缩 3 次。</td></tr>
+          <tr><td>工作模型和评估器发同一个请求</td><td>共用摘要内核与原文；评估请求另有 JSON 包装和转义开销，会重新核算可用预算。</td></tr>
+          <tr><td>手动压缩可以越过保护</td><td><code>force=True</code> 绕过触发比例，不绕过轮次、最近窗口、配对和硬上限。</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section aria-label="复习提纲">
+      <h2>记住这一点</h2>
+      <p><strong>压缩修改的是请求视图；轮次边界保护协议，暂存后提交保护摘要状态，原文与引用负责可恢复。</strong>这不能保证摘要语义完全无损，也不能替代精确 token 估算。</p>
+    </section>
+    <section id="evidence">
+      <h2>源码与证据</h2>
+      <p>基线：2026-11-10；HEAD <code>90f81c20681a6740b498584b249a4061a5d90b11</code> 加当前未提交工作区。以下是实现与测试代码证据；本页未执行项目测试。</p>
+      <ul>
+        <li><a href="../../../src/patchpilot/core/compression.py"><code>core/compression.py · HistoryCompactor.compact / _boundaries / view / restore</code></a> — 范围筛选、暂存提交、视图与指纹校验。</li>
+        <li><a href="../../../src/patchpilot/core/context.py"><code>core/context.py · ContextBuilder.build</code></a> — 固定开销预留和最终完整请求字符检查。</li>
+        <li><a href="../../../src/patchpilot/session_runtime/compression.py"><code>session_runtime/compression.py · summarize_history</code></a> — 二分控制摘要请求片段大小，限制 JSON 摘要协议，拒绝工具调用。</li>
+        <li><a href="../../../src/patchpilot/session_runtime/session.py"><code>session_runtime/session.py · _summarize / _evaluation_view / compact</code></a> — 共享预算、评估包装开销与手动入口。</li>
+        <li><a href="../../../tests/test_context_compression.py"><code>tests/test_context_compression.py</code></a> — 包含当前轮保护、失败保留旧块、原文篡改拒绝恢复和工作/评估使用压缩视图的断言。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

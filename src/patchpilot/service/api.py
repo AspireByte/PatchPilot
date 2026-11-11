@@ -104,9 +104,7 @@ def create_app(
                 401, "需要有效的本机服务令牌", headers={"WWW-Authenticate": "Bearer"}
             )
 
-    app = FastAPI(
-        title="myagent 任务服务", lifespan=lifespan, dependencies=[Depends(authenticate)]
-    )
+    app = FastAPI(title="myagent 任务服务", lifespan=lifespan, dependencies=[Depends(authenticate)])
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"]
     )

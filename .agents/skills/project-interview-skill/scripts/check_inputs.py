@@ -11,10 +11,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable
-
 
 MIN_DESCRIPTION_CHARS = 40
 KEYWORD_HINTS = (
@@ -78,17 +77,11 @@ def analyze(description: str, tech_stack: str | None, role_focus: str | None) ->
         )
 
     if not _has_any_keyword(description, KEYWORD_HINTS) and desc_len < MIN_DESCRIPTION_CHARS * 2:
-        suggestions.append(
-            "请补充：项目解决什么问题，最值得掌握的核心机制是什么？"
-        )
-        suggestions.append(
-            "请补充：一个**技术或业务难点**，以及你如何验证「已解决」？"
-        )
+        suggestions.append("请补充：项目解决什么问题，最值得掌握的核心机制是什么？")
+        suggestions.append("请补充：一个**技术或业务难点**，以及你如何验证「已解决」？")
 
     if not tech_stack or not tech_stack.strip():
-        suggestions.append(
-            "技术栈未提供：若补充语言/框架/存储/消息/观测栈，面试题会更准。"
-        )
+        suggestions.append("技术栈未提供：若补充语言/框架/存储/消息/观测栈，面试题会更准。")
 
     if not role_focus or not role_focus.strip():
         suggestions.append(

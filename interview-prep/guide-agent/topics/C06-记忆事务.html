@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C06 · 记忆记录与提取游标为什么必须一起提交</title>
+  <style>
+    :root { color-scheme: light; --ink: #182d2a; --muted: #495e57; --accent: #126657; --rule: #c4cfc5; --paper: #f8f8f1; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.75 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    main { max-width: 52rem; margin: auto; padding: 2.5rem clamp(1rem, 4vw, 2rem) 4rem; }
+    a { color: var(--accent); text-underline-offset: .2em; overflow-wrap: anywhere; }
+    nav { display: flex; gap: .5rem 1.5rem; flex-wrap: wrap; }
+    header { border-bottom: 2px solid var(--ink); padding: 1rem 0; }
+    h1 { margin: .5rem 0; font-size: clamp(1.8rem, 5vw, 2.8rem); line-height: 1.25; }
+    h2, legend { margin: 0 0 .6rem; font-size: 1.18rem; font-weight: 650; }
+    p { margin: .5rem 0; }
+    section, fieldset { margin: 1.6rem 0 0; }
+    fieldset { min-width: 0; padding: 1rem clamp(.9rem, 3vw, 1.5rem); border: 1px solid var(--rule); border-radius: .7rem; background: #fffefa; }
+    legend { padding: 0 .3rem; }
+    .choices { position: relative; margin-top: .8rem; }
+    .choices input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; }
+    .choices label { display: inline-block; margin: 0 .3rem .5rem 0; padding: .4rem .8rem; border: 1px solid var(--rule); border-radius: .4rem; cursor: pointer; }
+    .choices input:checked + label { background: var(--ink); color: white; border-color: var(--ink); }
+    .choices input:focus-visible + label, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    .case { display: none; margin-top: .35rem; padding-top: .6rem; border-top: 1px solid var(--rule); }
+    #case-a:checked ~ .case-a, #case-b:checked ~ .case-b, #case-c:checked ~ .case-c, #case-d:checked ~ .case-d { display: block; }
+    .case h3 { margin: .25rem 0; font-size: 1.05rem; }
+    .path { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
+    #evidence { border-top: 1px solid var(--rule); padding-top: 1rem; color: var(--muted); }
+    #evidence ul { padding-inline-start: 1.3rem; }
+    code { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+    @media print { body { background: white; } nav, .choices label, .choices input { display: none; } .case { display: block; } fieldset { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <main>
+    <nav aria-label="课程导航">
+      <a href="../../PatchPilot/导学.md">返回导学</a>
+      <a href="../06-长期记忆.md">返回课程 · C06 长期记忆</a>
+    </nav>
+    <header>
+      <h1>C06 · 记忆记录与提取游标为什么必须一起提交</h1>
+      <p>切换首次提交、重复投递和并发冲突，观察同一批记忆操作怎样改变记录版本、全文索引、修订历史与提取游标。</p>
+    </header>
+    <section id="mechanism">
+      <h2>机制怎么工作</h2>
+      <p>提取从原始 <code>messages</code> 的已确认游标开始，按消息、内容片段和字符偏移截取有界来源；模型只返回带来源引用和预期版本的 JSON 操作。宿主校验后，用起止游标生成批次 ID，再调用 <code>SQLiteMemoryStore.apply_batch</code>。事务内依次执行：先查批次去重，再比对完整起始游标，再确认位置前进，再写全部记忆及其索引和修订，最后推进游标并登记批次。所有步骤成功才提交。</p>
+      <p>已处理批次直接返回 <code>False</code>，早于游标比较；新批次遇到游标或记录版本冲突则回滚整批。模型请求发生在事务之外，失败回滚不能退回已消耗的调用预算。SQLite 事务也不包含会话 <code>state.json</code>、事件日志或仓库文件。</p>
+    </section>
+    <fieldset id="explore">
+      <legend>这次提交遇到了什么状态？</legend>
+      <p>以下均为机制示意，非实际运行数据。原计划处理原文 m2 到 m4 之前的消息：<code>start=(2,0,0)</code>，<code>end=(4,0,0)</code>，更新主题 A，预期版本为 1。实际游标还携带原文摘要 <code>digest</code>；示意省略摘要内容。每个选项独立展示对应前置状态。</p>
+      <div class="choices">
+        <input id="case-a" type="radio" name="case" aria-controls="result-a" checked><label for="case-a">首次提交：版本与游标匹配</label>
+        <input id="case-b" type="radio" name="case" aria-controls="result-b"><label for="case-b">重复提交：同一批次已登记</label>
+        <input id="case-c" type="radio" name="case" aria-controls="result-c"><label for="case-c">版本冲突：后续操作失败</label>
+        <input id="case-d" type="radio" name="case" aria-controls="result-d"><label for="case-d">游标冲突：另一批已推进</label>
+        <div class="case case-a" id="result-a">
+          <h3>首次提交：记录与游标一同变化</h3>
+          <p class="path">BEGIN IMMEDIATE → 批次未登记 → cursor == start → end 前进 → A v1→v2 → cursor m2→m4 → 登记批次 → COMMIT</p>
+          <p>返回 <code>True</code>。A 的正文、摘要、FTS 索引与 v2 修订一起写入，游标到 m4，批次被登记。即使提取返回空操作数组，合法的新批次仍可推进游标并登记，表示该段原文已经检查过。</p>
+        </div>
+        <div class="case case-b" id="result-b">
+          <h3>重复提交：去重先于游标校验</h3>
+          <p class="path">BEGIN IMMEDIATE → 找到同一 scope / session / batch_id → 返回 False → COMMIT（无写入）</p>
+          <p>此前首次提交已经令 A=v2、cursor=m4。本次仍带旧 start=m2，但不会报游标冲突，因为批次去重先执行。A 不升到 v3，游标不重复推进，索引和修订也不重复写。这里演示存储层重复投递；协调器下次正常提取会先读最新游标。</p>
+        </div>
+        <div class="case case-c" id="result-c">
+          <h3>版本冲突：先写的操作也回滚</h3>
+          <p class="path">批次未登记 → cursor=m2 匹配 → 暂写新主题 B → 更新 A 时发现数据库已是 v2、请求仍预期 v1 → ValueError → ROLLBACK</p>
+          <p>假设别的会话已更新 A，却没有改变本会话游标。本批先写入 B，再碰到 A 的版本冲突，整个事务回滚：B 不保留，A 仍为并发更新后的 v2，本会话游标仍在 m2，批次不登记。FTS 与修订表也回滚；不会留下“原文已处理，但记忆只写一半”的状态。</p>
+        </div>
+        <div class="case case-d" id="result-d">
+          <h3>游标冲突：记忆操作尚未执行</h3>
+          <p class="path">批次未登记 → 数据库 cursor=m3，但 start=m2 → ValueError → ROLLBACK</p>
+          <p>这是新批次，所以不能命中去重。存储层比较整个游标对象（包括 digest），发现与开始提取时的状态不同，直接拒绝；A、索引、修订均没有被本批修改，游标保留已经确认的 m3。后续处理需要重新取得游标和原文；本次调用不会自动覆盖水位或无限重试。</p>
+        </div>
+      </div>
+    </fieldset>
+    <section aria-label="召回与提取的区别">
+      <h2>召回快照与原文提取分开</h2>
+      <p>召回在一轮开始时将全局偏好与当前项目搜索结果组织为有界、不可变的摘要快照，注入请求。全文搜索使用 SQLite FTS5 与 BM25 排序；本项目没有向量检索实现。需要正文时，工作模型使用只读记忆工具分页读取。</p>
+      <p>提取读取原始消息而非压缩摘要或召回快照；跳过记忆工具返回的内容，避免记忆回流成为新的来源。位置由 <code>message / part / offset</code> 描述，<code>digest</code> 校验原文引用；这不是逐 token 的后台线程。正常回答完成后同步处理一批，也可通过显式命令处理下一批，单批受来源片段与字符预算限制。</p>
+      <p>全局自动记忆只接受用户明确表达的偏好；成功经验还需当时成功的命令或检查证据。来源校验缩小无依据写入的范围，但不能保证模型摘要语义完全正确。记忆始终是历史数据，不授予执行权限，也不能替代本次测试。</p>
+    </section>
+    <section aria-label="失败与遗忘边界">
+      <h2>回答完成，不代表记忆一定写入</h2>
+      <p><code>AgentSession._finish_answer</code> 先保存会话，再尝试提取；提取异常记录为记忆错误，已经生成的主回答仍可返回。游标保留旧位置，后续可从该处重新处理。若已用掉模型调用或 token，数据库回滚也不会撤销用量。</p>
+      <p>用户遗忘会留下墓碑，迟到的自动批次遇到同主题墓碑时跳过该项，仍可提交其余合法操作并推进游标；显式手动记忆才可恢复该主题。历史会话与修订仍保留，因此“忘记”表示停止召回，并不等于物理擦除全部历史。</p>
+    </section>
+    <section aria-label="复习提纲">
+      <h2>记住这一点</h2>
+      <p>游标表示哪些原文已处理：它必须与整批记忆写入共用一个事务；同批次先去重，新批次再校验游标和版本，失败时两边都不推进。</p>
+    </section>
+    <section id="evidence">
+      <h2>源码与证据</h2>
+      <p>源码基线：2026-11-10，HEAD <code>90f81c20681a6740b498584b249a4061a5d90b11</code>，加当前未提交工作区。下列测试是源码证据入口，本页没有执行测试或模型请求。</p>
+      <ul>
+        <li><a href="../../../src/patchpilot/infrastructure/persistence/memory_store.py"><code>memory_store.py · SQLiteMemoryStore.apply_batch / _transaction / _upsert</code></a> — 批次优先去重、游标比较、版本检查、索引与修订写入，以及异常回滚的真实实现。</li>
+        <li><a href="../../../src/patchpilot/session_runtime/memory.py"><code>memory.py · MemoryCoordinator.extract / _checked_cursor / recall</code></a> — 有界原文来源、批次 ID、提取协议与召回入口。</li>
+        <li><a href="../../../src/patchpilot/core/memory.py"><code>core/memory.py · MemoryCursor / MemoryUpdate / MemorySnapshot</code></a> — 游标、预期版本与不可变摘要快照的数据契约。</li>
+        <li><a href="../../../src/patchpilot/session_runtime/session.py"><code>session.py · AgentSession._finish_answer</code></a> — 主回答完成后的同步提取与异常隔离。</li>
+        <li><a href="../../../tests/test_memory.py"><code>test_atomic_batch_versions_tombstones_and_empty_replay</code></a> — 测试代码覆盖正常提交、重复批次、部分写入后版本冲突回滚、墓碑和空批次；<code>test_bad_extraction_keeps_answer_cursor_and_retries</code> 覆盖回答保留与游标不推进。本次未执行。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

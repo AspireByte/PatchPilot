@@ -310,7 +310,7 @@ def run_batch(
         agent_prompt_sha256=_sha(SYSTEM_PROMPT.encode()),
         tool_schema_sha256=_sha(json.dumps(tool_definitions(), sort_keys=True).encode()),
         dependency_versions={
-            name: version(name) for name in ("patchpilot", "anthropic", "pydantic", "httpx2")
+            name: version(name) for name in ("myagent", "anthropic", "pydantic", "httpx2")
         },
     )
     config_hash = _sha(

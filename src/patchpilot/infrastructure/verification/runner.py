@@ -246,6 +246,19 @@ class DockerBackend:
         max_output: int,
         control: ExecutionControl | None,
     ) -> ProcessResult:
+        deadline = time.monotonic() + timeout
+        if os.name != "nt":
+            # 容器以固定的非 root 用户运行，只调整私有临时目录中的挂载副本。
+            for directory, _, files in os.walk(snapshot):
+                if control:
+                    control.check()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Harness 总时限已耗尽")
+                parent = Path(directory)
+                parent.chmod(0o777)
+                for filename in files:
+                    path = parent / filename
+                    path.chmod(0o666 | (path.stat().st_mode & 0o111))
         name = "patchpilot-harness-" + uuid.uuid4().hex
         command = [
             "docker",
@@ -291,12 +304,15 @@ class DockerBackend:
             image_id,
             *profile.argv[1:],
         ]
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Harness 总时限已耗尽")
         cleanup_ok = True
         try:
             return self.process_fn(
                 command,
                 cwd=snapshot,
-                timeout=timeout,
+                timeout=remaining,
                 max_output=max_output,
                 control=control,
             )
@@ -452,9 +468,10 @@ class VerificationRunner:
                 )
                 image_id = None
                 if runtime != "host":
+                    self._check(deadline)
                     try:
                         image_id = (
-                            self.docker_image_fn(self._check(deadline))
+                            self.docker_image_fn(deadline)
                             if self.docker_image_fn
                             else self.docker.check(deadline, self.control)
                         )
@@ -465,7 +482,9 @@ class VerificationRunner:
                     ) as error:
                         self._check(deadline)
                         if runtime == "docker" or not self.config.allow_host_fallback:
-                            raise ValueError("Docker 或配置镜像不可用，未执行检查") from error
+                            raise VerificationBackendError(
+                                f"Docker 或配置镜像不可用，未执行检查：{error}"
+                            ) from error
                         values["fallback_reason"] = "Docker 或本地镜像不可用，按授权降级到宿主"
                         runtime = "host"
                     else:
